@@ -1,4 +1,4 @@
-name: Build and deplot the documentaion
+name: Build and deploy the documentaion
 
 on:
     push:

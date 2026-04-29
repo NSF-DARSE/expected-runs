@@ -20,3 +20,4 @@ stadium, weather, etc.
    :maxdepth: 2
    :caption: Contents:
 
+   code_documentation

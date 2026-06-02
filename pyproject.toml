@@ -19,6 +19,7 @@ dependencies = [
     "scikit-learn",
     "scipy",
     "matplotlib",
+    "shap"
 ]
 
 [project.optional-dependencies]

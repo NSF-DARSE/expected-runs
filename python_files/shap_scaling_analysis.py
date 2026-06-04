@@ -192,6 +192,9 @@ def create_normalized_pitcher_scores(
     pitcher_avg_df["normalized_score"] = (
         100 - (pitcher_avg_df["raw_shap_sum"] - mean_val) * scaling_factor
     )
+    pitcher_avg_df["normalized_score"] = (
+        pitcher_avg_df["normalized_score"].round(0).astype(int)
+    )
 
     pitcher_avg_df.to_csv(
         output_dir / "pitcher_normalized_scores.csv",

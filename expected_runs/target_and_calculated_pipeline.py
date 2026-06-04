@@ -3,7 +3,8 @@ import calendar
 from datetime import datetime
 
 import pandas as pd
-from Helpers import add_runner_states, add_game_state, add_runs_remaining
+from expected_runs.Helpers import (add_runner_states, 
+            add_game_state, add_runs_remaining)
 
 
 # Final schema (same list you already use)
@@ -198,15 +199,3 @@ def build_final_dataset(base_path, years, summary_path, out_dir, save=True):
         print(f"Final dataset saved: {out_path}")
 
     return final_df
-
-
-# ---------------- RUN ----------------
-final_df = build_final_dataset(
-    base_path="/Users/suma/Downloads/Baseball_Project/v3",
-    years=["2024", "2025"],
-    summary_path="/Users/suma/Downloads/Baseball_Project/CSV_files/game_state_summary_file/GameState_Summary.csv",
-    out_dir="/Users/suma/Downloads/Baseball_Project/CSV_files",
-    save=True
-)
-
-final_df

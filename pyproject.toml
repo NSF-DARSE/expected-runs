@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "expected_runs"
+version = "0.1.0"
+description = "Python package for expected runs based baseball analytics"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Suma Tata"},
+  { name = "Abhin Suresh" }
+]
+dependencies = [
+    "pandas",
+    "numpy",
+    "scikit-learn",
+    "scipy",
+    "matplotlib",
+    "shap"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "build"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["expected_runs*"]

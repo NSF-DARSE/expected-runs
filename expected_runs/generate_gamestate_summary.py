@@ -3,7 +3,7 @@ from datetime import datetime
 import os
 import pandas as pd
 
-from Helpers import (
+from expected_runs.Helpers import (
     add_runner_states,
     add_game_state,
     add_runs_remaining,
@@ -112,11 +112,3 @@ def build_gamestate_summary_all_years(data_root, save_path):
     print(f"\nAll-year summary saved: {out_path}")
 
     return combined_df
-
-
-if __name__ == "__main__":
-    data_root = "/Users/suma/Downloads/Baseball_Project/v3"
-    save_path = "/Users/suma/Downloads/Baseball_Project/CSV_files"
-
-    summary_df = build_gamestate_summary_all_years(data_root, save_path)
-    print(summary_df.head())

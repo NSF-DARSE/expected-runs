@@ -1,4 +1,4 @@
-# Pitch Physical Parameters Against Expected Runs Model
+# Baseball Pitch Physical Parameters Against Expected Runs Model
 
 This project builds an expected-runs based pitch evaluation workflow for baseball TrackMan data. It creates pitch-level run value targets, engineers physical pitch features, trains models on four-seam fastballs, and uses SHAP values to explain pitcher-level performance.
 

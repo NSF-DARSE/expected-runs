@@ -2,23 +2,21 @@
 Create the four-seam fastball dataset used for modeling.
 
 This script is the Python-file version of the ff_data_set_creation.ipynb
-workflow. It creates df_ff.csv and the team-specific df_del_blu_ff.csv using
-the same logic as the notebook.
+workflow. It creates timestamped df_ff and team-specific df_del_blu_ff files
+using the same logic as the notebook.
 """
 
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 
 
 DEFAULT_INPUT_PATH = Path(
-    "/Users/suma/Downloads/Baseball_Project/CSV_files/Final Data Set/Final_Target_Calc.csv"
+    "/Users/suma/Downloads/Baseball_Project/CSV_files/corrected_target_outputs/Final_Target_Calc_2109.csv"
 )
-DEFAULT_OUTPUT_PATH = Path(
-    "/Users/suma/Downloads/Baseball_Project/CSV_files/df_ff_new/df_ff.csv"
-)
-DEFAULT_TEAM_OUTPUT_PATH = Path(
-    "/Users/suma/Downloads/Baseball_Project/CSV_files/df_ff_new/df_del_blu_ff.csv"
+DEFAULT_OUTPUT_DIR = Path(
+    "/Users/suma/Downloads/Baseball_Project/CSV_files/corrected_target_outputs"
 )
 DEFAULT_TEAM_CODE = "DEL_BLU"
 
@@ -37,6 +35,16 @@ FEATURE_COLUMNS = [
     "horzbreakdiff",
     "velocity_differential",
 ]
+
+
+def get_timestamped_output_paths(output_dir=DEFAULT_OUTPUT_DIR):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+
+    output_dir = Path(output_dir)
+    ff_output_path = output_dir / f"df_ff_{timestamp}.csv"
+    team_output_path = output_dir / f"df_del_blu_ff_{timestamp}.csv"
+
+    return ff_output_path, team_output_path
 
 
 def assign_bucket(row):
@@ -65,9 +73,9 @@ def assign_bucket(row):
         return "Exclude"
 
 
-def create_ff_dataset(input_path=DEFAULT_INPUT_PATH, output_path=DEFAULT_OUTPUT_PATH):
+def create_ff_dataset(input_path=DEFAULT_INPUT_PATH, output_path=None):
     """
-    Creates the four-seam fastball dataset from Final_Target_Calc.csv.
+    Creates the four-seam fastball dataset from the final target/calculated dataset.
 
     Steps:
         1. Load the final target/calculated dataset.
@@ -78,17 +86,19 @@ def create_ff_dataset(input_path=DEFAULT_INPUT_PATH, output_path=DEFAULT_OUTPUT_
         6. Add binary handedness features.
         7. Reorder handedness features after RelSide.
         8. Drop rows missing Extension or SpinRate.
-        9. Save df_ff.csv and return the dataframe.
+        9. Optionally save df_ff and return the dataframe.
 
     Args:
         input_path: Path to Final_Target_Calc.csv.
-        output_path: Path where df_ff.csv should be saved.
+        output_path: Optional path where df_ff should be saved.
 
     Returns:
         pandas.DataFrame: The cleaned four-seam fastball dataset.
     """
     input_path = Path(input_path)
-    output_path = Path(output_path)
+
+    if output_path is not None:
+        output_path = Path(output_path)
 
     df = pd.read_csv(input_path)
 
@@ -134,8 +144,9 @@ def create_ff_dataset(input_path=DEFAULT_INPUT_PATH, output_path=DEFAULT_OUTPUT_
     # Final notebook cleanup before saving df_ff.csv.
     df_ff = df_ff.dropna(subset=["Extension", "SpinRate"])
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    df_ff.to_csv(output_path, index=False)
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        df_ff.to_csv(output_path, index=False)
 
     return df_ff
 
@@ -143,8 +154,8 @@ def create_ff_dataset(input_path=DEFAULT_INPUT_PATH, output_path=DEFAULT_OUTPUT_
 def create_team_ff_dataset(
     df_ff=None,
     team_code=DEFAULT_TEAM_CODE,
-    ff_input_path=DEFAULT_OUTPUT_PATH,
-    output_path=DEFAULT_TEAM_OUTPUT_PATH,
+    ff_input_path=None,
+    output_path=None,
 ):
     """
     Creates the team-specific four-seam fastball dataset from df_ff.
@@ -159,16 +170,19 @@ def create_team_ff_dataset(
         df_ff: Optional four-seam fastball dataframe created by
             create_ff_dataset(). If not provided, ff_input_path is loaded.
         team_code: PitcherTeam value to keep.
-        ff_input_path: Path to df_ff.csv when df_ff is not provided.
-        output_path: Path where df_del_blu_ff.csv should be saved.
+        ff_input_path: Path to df_ff when df_ff is not provided.
+        output_path: Optional path where df_del_blu_ff should be saved.
 
     Returns:
         pandas.DataFrame: Team-specific four-seam fastball dataset.
     """
     if df_ff is None:
+        if ff_input_path is None:
+            raise ValueError("Either df_ff or ff_input_path must be provided.")
         df_ff = pd.read_csv(ff_input_path)
 
-    output_path = Path(output_path)
+    if output_path is not None:
+        output_path = Path(output_path)
 
     df_del_blu_ff = df_ff[df_ff["PitcherTeam"] == team_code].copy()
 
@@ -178,14 +192,24 @@ def create_team_ff_dataset(
         .str.replace(r"\s+,", ",", regex=True)
     )
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    df_del_blu_ff.to_csv(output_path, index=False)
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        df_del_blu_ff.to_csv(output_path, index=False)
 
     return df_del_blu_ff
 
 
 if __name__ == "__main__":
-    final_df = create_ff_dataset()
-    team_df = create_team_ff_dataset(df_ff=final_df)
-    print(f"df_ff.csv created with shape: {final_df.shape}")
-    print(f"df_del_blu_ff.csv created with shape: {team_df.shape}")
+    ff_output_path, team_output_path = get_timestamped_output_paths()
+
+    final_df = create_ff_dataset(output_path=ff_output_path)
+    team_df = create_team_ff_dataset(
+        df_ff=final_df,
+        output_path=team_output_path,
+    )
+
+    print(f"df_ff created: {ff_output_path}")
+    print(f"df_ff shape: {final_df.shape}")
+
+    print(f"df_del_blu_ff created: {team_output_path}")
+    print(f"df_del_blu_ff shape: {team_df.shape}")

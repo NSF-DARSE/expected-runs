@@ -44,7 +44,12 @@ def generate_target_for_month(base_path, year, month, summary_path):
             continue
 
         for file in os.listdir(folder_path):
-            if not file.endswith(".csv") or "unverified" in file.lower():
+            file_lower = file.lower()
+            if (
+                not file_lower.endswith(".csv")
+                or "unverified" in file_lower
+                or "playerpositioning" in file_lower
+            ):
                 continue
 
             file_path = os.path.join(folder_path, file)
@@ -70,10 +75,14 @@ def generate_target_for_month(base_path, year, month, summary_path):
                 df["ExpectedRuns_Next"] = df["ExpectedRuns"].shift(-1)
                 df["Top/Bottom_Next"] = df["Top/Bottom"].shift(-1)
 
+                df["RunsScored"] = df["RunsScored"].fillna(0)
                 df["Target"] = df.apply(
-                    lambda r: round(0 - r["ExpectedRuns"], 4)
+                    lambda r: round(r["RunsScored"] - r["ExpectedRuns"], 4)
                     if r["Top/Bottom"] != r["Top/Bottom_Next"]
-                    else round(r["ExpectedRuns_Next"] - r["ExpectedRuns"], 4),
+                    else round(
+                        r["RunsScored"] + r["ExpectedRuns_Next"] - r["ExpectedRuns"],
+                        4
+                    ),
                     axis=1
                 )
 
@@ -126,6 +135,20 @@ def add_calculated_features(df):
 
     required_for_calc = ["PitcherId", "TaggedPitchType", "RelSpeed", "InducedVertBreak", "HorzBreak"]
     df_clean = df.dropna(subset=required_for_calc).copy()
+    df_clean["TaggedPitchType"] = df_clean["TaggedPitchType"].replace({
+        "Changeup": "ChangeUp",
+    })
+
+    excluded_reference_pitch_types = {
+        "Undefined",
+        "Other",
+        "Knuckleball",
+        "OneSeamFastBall",
+    }
+
+    df_clean = df_clean[
+        ~df_clean["TaggedPitchType"].isin(excluded_reference_pitch_types)
+    ].copy()
 
     fastest_pitch = (
         df_clean.loc[df_clean.groupby("PitcherId")["RelSpeed"].idxmax(), ["PitcherId", "TaggedPitchType"]]
@@ -205,7 +228,7 @@ final_df = build_final_dataset(
     base_path="/Users/suma/Downloads/Baseball_Project/v3",
     years=["2024", "2025"],
     summary_path="/Users/suma/Downloads/Baseball_Project/CSV_files/game_state_summary_file/GameState_Summary.csv",
-    out_dir="/Users/suma/Downloads/Baseball_Project/CSV_files",
+    out_dir="/Users/suma/Downloads/Baseball_Project/CSV_files/corrected_target_outputs",
     save=True
 )
 

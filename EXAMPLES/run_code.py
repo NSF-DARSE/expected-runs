@@ -1,27 +1,51 @@
 #import sys
 import glob
+import os
 
 #path = "../python_files/"
 #sys.path.append(path)
 
 from expected_runs.generate_gamestate_summary import *
+
+from expected_runs.filter_pitch_type import *
  
 # /path/to/trackman/data
-base_path = "../../v3"
+data_path = "../../v3"
 years = ["2024", "2025"]
 
-out_dir = "../expected_runs/results/CSV_files"
+OUT_DIR = "../results/CSV_files"
 
-summary_df = build_gamestate_summary_all_years(base_path, out_dir)
+summary_df = build_gamestate_summary_all_years(data_path, OUT_DIR)
 
-# returns a list of gamestate.csv files choose one in next fun.
-summary_path = glob.glob(out_dir + "GameState_*.csv")
 
-print(summar_path)
+# returns a list of gamestate.csv files choose one in next fun
+summary_files = sorted(glob.glob(OUT_DIR + "GameState_*.csv"),
+                        key=os.path.getmtime, reverse=True)                                                                            
 
-final_df = build_final_dataset(
-                base_path,
+target_df = build_final_dataset(
+                data_path,
                 years=["2024", "2025"],
-                summary_path[0],
-                out_dir,
+                summary_files[0],
+                OUT_DIR,
                 save=True)
+
+# getting file paths
+ff_output_path, team_output_path = get_timestamped_output_paths(OUT_DIR)
+
+target_files = sorted(glob.glob(OUT_DIR + "/Final_Target_Calc_*.csv")
+                        key=os.path.getmtime, reverse=True)                                                                            
+
+final_ff_df = create_ff_dataset(input_path=target_files[0], 
+                            output_path=ff_output_path)
+
+team_ff_df = create_team_ff_dataset(df_ff = final_ff_df,
+                                    output_path=team_output_path)
+
+input_paths = sorted(glob.glob(out_dir + "/df_ff_*.csv")
+                        key=os.path.getmtime, reverse=True)
+
+model, train_results, test_results = \
+        train_random_forest_model(
+                input_path=input_paths[0], 
+                model_path=out_dir+f"/model_{timestamp}.csv")
+                                                                 

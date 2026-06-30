@@ -1,6 +1,7 @@
 #import sys
 import glob
 import os
+from sklearn.ensemble import RandomForestRegressor
 
 #path = "../python_files/"
 #sys.path.append(path)
@@ -44,8 +45,15 @@ team_ff_df = create_team_ff_dataset(df_ff = final_ff_df,
 input_paths = sorted(glob.glob(out_dir + "/df_ff_*.csv")
                         key=os.path.getmtime, reverse=True)
 
-model, train_results, test_results = \
-        train_random_forest_model(
-                input_path=input_paths[0], 
-                model_path=out_dir+f"/model_{timestamp}.csv")
-                                                                 
+rf = RandomForestRegressor(
+    n_estimators=100,
+    max_depth=None,
+    random_state=42,
+    n_jobs=-1,
+)
+
+model, train_results, test_results = train_model(
+                        input_path = input_paths[0], 
+                        model_path = out_dir+f"/model_{timestamp}.csv",
+                        model   = rf, test_size=0.2,
+                        random_state=42)                          

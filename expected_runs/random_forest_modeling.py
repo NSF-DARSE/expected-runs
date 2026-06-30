@@ -11,7 +11,6 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 
@@ -58,7 +57,8 @@ def evaluate_predictions(y_true, y_pred):
     }
 
 
-def train_random_forest_model(input_path, model_path):
+def train_model(input_path, model_path, model=rf, test_size=0.2,
+                random_state=42):
     """
     Trains and saves the finalized full Random Forest model.
 
@@ -85,19 +85,9 @@ def train_random_forest_model(input_path, model_path):
     X = df_ff[FEATURE_COLUMNS]
     y = df_ff[TARGET_COLUMN]
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=0.2,
-        random_state=42,
-    )
-
-    rf = RandomForestRegressor(
-        n_estimators=100,
-        max_depth=None,
-        random_state=42,
-        n_jobs=-1,
-    )
+    X_train, X_test, y_train, y_test = train_test_split(X, y,
+                                test_size=test_size,
+                                random_state=random_state)
 
     rf.fit(X_train, y_train)
 

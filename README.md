@@ -1,19 +1,35 @@
 Pitch's physical parameters against expected runs model
 =======================================================
-# Python Files
+## Create Virtual Environment
 
-This folder contains the main Python scripts and notebook used for building expected-runs targets, calculated pitch features, conference-based filtering, model training, and SHAP-based pitcher analysis.
+```bash
+python -m venv .aiml
+```
 
-## Files
+### Activate Environment
 
-| File | Description |
-|---|---|
-| `Helpers.py` | Contains helper functions for reconstructing base runner states, creating game-state labels, calculating runs remaining, and computing zero-run probabilities. |
-| `generate_gamestate_summary.py` | Builds a game-state summary table across available TrackMan CSV files, including expected runs and zero-run probability for each game state. |
-| `target_and_calculated_pipeline.py` | Creates the final modeling dataset by adding expected-runs targets and calculated pitch features such as velocity differential and movement differences. |
-| `conf_teams.ipynb` | Notebook for conference team shortcut mapping, filtering four-seam fastball data to selected conferences, training/evaluating models, and comparing SHAP-based pitcher scores with coach scores. |
+Linux/macOS:
 
-## Workflow Overview
+```bash
+source .aiml/bin/activate
+```
+
+Windows PowerShell:
+
+```powershell
+.aiml\Scripts\Activate.ps1
+```
+
+## Installation
+
+```bash
+pip install -e ".[dev]"
+```
+
+## Example
+How to run the code is shown in the the EXAMPLES directory
+
+## Modules Overview
 
 1. `Helpers.py` defines reusable functions for runner states, game states, and run expectancy calculations.
 2. `generate_gamestate_summary.py` uses those helper functions to create a game-state expected-runs summary.
@@ -30,7 +46,5 @@ The workflow supports creation of:
 - conference-filtered four-seam datasets
 - SHAP value exports
 - normalized pitcher scoring tables
-
-
 
 The documentation for the project can be found at https://NSF-DARSE.github.io/expected-runs

@@ -144,7 +144,7 @@ def add_runs_remaining(df):
 
         # For each row, calculate total runs scored AFTER that row
         # i+1 ensures we exclude current pitch's runs
-        future_runs = [sum(runs[i+1:]) for i in range(len(runs))]
+        future_runs = [sum(runs[i:]) for i in range(len(runs))]
 
         # Assign computed future run totals back to original dataframe
         df.loc[group.index, 'RunsRemaining'] = future_runs

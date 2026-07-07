@@ -57,7 +57,7 @@ def evaluate_predictions(y_true, y_pred):
     }
 
 
-def train_model(input_path, model_path, model=rf, test_size=0.2,
+def train_model(input_path, model_path, model, test_size=0.2,
                 random_state=42):
     """
     Trains and saves the finalized full Random Forest model.
@@ -89,15 +89,15 @@ def train_model(input_path, model_path, model=rf, test_size=0.2,
                                 test_size=test_size,
                                 random_state=random_state)
 
-    rf.fit(X_train, y_train)
+    model.fit(X_train, y_train)
 
-    y_train_pred = rf.predict(X_train)
-    y_test_pred = rf.predict(X_test)
+    y_train_pred = model.predict(X_train)
+    y_test_pred = model.predict(X_test)
 
     train_metrics = evaluate_predictions(y_train, y_train_pred)
     test_metrics = evaluate_predictions(y_test, y_test_pred)
 
     model_path.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(rf, model_path)
+    joblib.dump(model, model_path)
 
-    return rf, train_metrics, test_metrics
+    return model, train_metrics, test_metrics

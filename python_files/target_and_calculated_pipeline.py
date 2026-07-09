@@ -19,7 +19,8 @@ REQUIRED_COLS = [
     "Avg_InducedVertBreak_FastestType", "Avg_HorzBreak_FastestType",
     "Avg_RelSpeed_FastestType", "vertbreakdiff", "horzbreakdiff",
     "velocity_differential", "VertBreak", "PlateLocHeight", "PlateLocSide",
-    "Level", "League"
+    "ExitSpeed", "Angle", "Direction", "Distance", "HangTime",
+    "GameID", "PitchUID", "Level", "League"
 ]
 
 

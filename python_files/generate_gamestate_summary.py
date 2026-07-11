@@ -116,7 +116,7 @@ def build_gamestate_summary_all_years(data_root, save_path):
 
 if __name__ == "__main__":
     data_root = "/Users/suma/Downloads/Baseball_Project/v3"
-    save_path = "/Users/suma/Downloads/Baseball_Project/CSV_files"
+    save_path = "/Users/suma/Downloads/Baseball_Project/CSV_files/new_approach"
 
     summary_df = build_gamestate_summary_all_years(data_root, save_path)
     print(summary_df.head())

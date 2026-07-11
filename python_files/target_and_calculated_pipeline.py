@@ -12,7 +12,8 @@ REQUIRED_COLS = [
     "PitcherThrows", "PitcherTeam", "Batter", "BatterSide", "BatterTeam",
     "Inning", "Top/Bottom", "Outs", "Balls", "Strikes", "TaggedPitchType",
     "AutoPitchType", "PitchCall", "TaggedHitType", "PlayResult", "OutsOnPlay",
-    "RunsScored", "RunnerOn1B", "RunnerOn2B", "RunnerOn3B", "GameState",
+    "RunsScored", "ExitSpeed", "Angle", "Direction", "Distance", "HangTime",
+    "GameID", "PitchUID", "RunnerOn1B", "RunnerOn2B", "RunnerOn3B", "GameState",
     "RunsRemaining", "ExpectedRuns", "Target", "RelSpeed", "SpinRate",
     "Extension", "HorzBreak", "InducedVertBreak", "SpinAxis", "EffectiveVelo",
     "RelHeight", "RelSide", "FastestPitchType", "MaxRelSpeed",
@@ -227,8 +228,8 @@ def build_final_dataset(base_path, years, summary_path, out_dir, save=True):
 final_df = build_final_dataset(
     base_path="/Users/suma/Downloads/Baseball_Project/v3",
     years=["2024", "2025"],
-    summary_path="/Users/suma/Downloads/Baseball_Project/CSV_files/game_state_summary_file/GameState_Summary.csv",
-    out_dir="/Users/suma/Downloads/Baseball_Project/CSV_files/corrected_target_outputs",
+    summary_path="/Users/suma/Downloads/Baseball_Project/CSV_files/new_approach/GameState_Summary_20260711_1512.csv",
+    out_dir="/Users/suma/Downloads/Baseball_Project/CSV_files/new_approach",
     save=True
 )
 

@@ -122,12 +122,12 @@ def add_game_state(df):
 
 def add_runs_remaining(df):
     """
-    Calculates the number of runs that will be scored later
-    in the same half-inning after each pitch.
+    Calculates the number of runs scored from the current pitch
+    through the end of the same half-inning.
 
     For each (Inning, Top/Bottom) group:
         - Looks at RunsScored column
-        - Computes how many runs occur AFTER the current row
+        - Computes runs scored on the current pitch plus all later pitches
         - Stores that value in a new column: RunsRemaining
 
     This is used later for run expectancy calculations.
@@ -142,9 +142,9 @@ def add_runs_remaining(df):
         # Convert RunsScored to integers, replacing NaN with 0
         runs = group['RunsScored'].fillna(0).astype(int).tolist()
 
-        # For each row, calculate total runs scored AFTER that row
-        # i+1 ensures we exclude current pitch's runs
-        future_runs = [sum(runs[i+1:]) for i in range(len(runs))]
+        # For each row, calculate total runs from the current pitch onward
+        # i ensures we include current pitch's runs
+        future_runs = [sum(runs[i:]) for i in range(len(runs))]
 
         # Assign computed future run totals back to original dataframe
         df.loc[group.index, 'RunsRemaining'] = future_runs

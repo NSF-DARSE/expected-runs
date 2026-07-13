@@ -125,7 +125,20 @@ def generate_target_for_years_df(base_path, years, summary_path):
         print("No valid files processed.")
         return None
 
-    return pd.concat(all_year_dfs, ignore_index=True)
+    combined = pd.concat(all_year_dfs, ignore_index=True)
+
+    # Some games exist as more than one CSV in the data folders, which loads the same
+    # pitches twice (~6% of rows in the 2024-2025 build). PitchUID is unique per pitch,
+    # so keep the first copy. Note the same duplication also inflates the GameState
+    # summary counts; deduplicating that build needs the same treatment.
+    if "PitchUID" in combined.columns:
+        before = len(combined)
+        combined = combined.drop_duplicates(subset=["PitchUID"], keep="first")
+        dropped = before - len(combined)
+        if dropped:
+            print(f"Dropped {dropped} duplicate rows ({100 * dropped / before:.2f}%) by PitchUID")
+
+    return combined
 
 
 def add_calculated_features(df):

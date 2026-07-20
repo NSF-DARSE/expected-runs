@@ -74,6 +74,35 @@ Average E[RV | swing] over a pitcher's pitches of the given type, then normalize
 familiar 100 +/- 15 scale. Normalize against the full population of qualifying D1 pitchers in
 our data, not a single roster, so that 100 means an average D1 four-seam fastball.
 
+## Score design principles: one construct per score
+
+Every named score measures exactly one skill. Stuff+ grades the physical pitch, Location+
+grades where pitches go, and the results component grades what happened. A score that quietly
+mixes constructs can still predict well, but it cannot be read or coached from, and its gains
+tend to be redundant with the components it borrowed from.
+
+Two rules follow:
+
+1. **Condition context at the pitch level, subtract it at the pitcher level.** When a pitch's
+   value depends on context (ball-strike count is the first case; pitch type is next), the
+   pitch-level grade should come from a context-conditioned baseline: a chase pitch on 0-2 is
+   a good pitch, the same pitch on 3-0 is not. But when aggregating to a pitcher-season score,
+   subtract the context baseline E[value | context] so the score reflects execution within
+   contexts, not occupancy of favorable ones. Spending more time in 0-2 counts is a real,
+   repeatable skill, but it is its own component (count management), not location.
+
+2. **Decompose before adopting.** When a candidate score beats the incumbent, split the gain
+   into the part that improves the claimed construct and the part that leaks in from elsewhere,
+   and check whether the gain survives alongside the results component in the combined score.
+   Adopt only what improves the construct the score claims to measure.
+
+Worked example (2026-07, four-seam): a count-conditioned Location+ beat the pooled version by
+about 2 SE on both reliability (0.51 vs 0.48) and next-year validity. Decomposing it showed
+the entire gain was count occupancy; the within-count location measurement tied the pooled map,
+and the advantage vanished in the three-score blend because last-year results already carry
+count mix. The shipped design keeps the count-conditioned map for pitch-level explanation and
+the count-relative (occupancy-subtracted) score at the pitcher level.
+
 ## How we judge success
 
 Not by pitch-level R-squared. The evaluation protocol for every candidate model:
@@ -86,6 +115,10 @@ Not by pitch-level R-squared. The evaluation protocol for every candidate model:
    beat are the year-over-year correlations of the raw stats themselves: ~0.17 if predicting
    run value, ~0.33 if predicting whiff rate. A model that cannot beat the matching baseline
    adds nothing over last year's stat line.
+4. Decomposition audit: before adopting a winning candidate, attribute its gain (see "Score
+   design principles" above). Verify the improvement lives in the construct the score claims,
+   and that it still adds value when combined with the results component rather than
+   duplicating it.
 
 ## Suggested work plan
 

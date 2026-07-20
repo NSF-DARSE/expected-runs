@@ -32,6 +32,7 @@ Requires: pandas, pyarrow, numpy, scipy, scikit-learn.
 | `07_models_vs_results.py` | Do the models alone out-predict the stat line? | 04 |
 | `08_staff_scores.py` | Staff scoresheet: scores, flags, explanation grids (`--team`) | 01 pass |
 | `09_secondary_pitches.py` | Does the stack transfer to sliders/changeups/curves? | 01 pass |
+| `10_secondary_usage.py` | What predicts secondary-pitch outcomes beyond stuff? (exploratory) | 01 pass |
 
 **Run 01 first, every time the source data changes.** If its prints do not match
 the anchor table in RESULTS.md, stop and reconcile before trusting anything else.

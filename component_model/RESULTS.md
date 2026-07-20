@@ -158,6 +158,34 @@ on average over a season. Production implication: show Location+ for fastballs;
 do not surface a season-level Location+ for secondary pitches, and score
 secondary pitch quality from Stuff+ (which is MORE predictive there).
 
+## Secondary pitches: a usage/deception component (script 10, EXPLORATORY)
+
+If season-average location does not predict secondary-pitch outcomes, what
+does? A reliability-gated screen of usage and fastball-relative location traits
+found four whose signs replicate across the slider and changeup panels:
+thrown below the pitcher's own fastball band helps (+); horizontal separation
+off the fastball's line hurts (-); heavier usage hurts (-); two-strike-only
+predictability hurts (-). The equal-weight composite of the four:
+
+| pitch (n) | composite rel | composite validity | adds over results+Stuff+ |
+|---|---|---|---|
+| slider (216) | 0.603 | 0.300 | +0.121, CI [+0.053, +0.186], P = 1.000 |
+| changeup (103) | 0.548 | 0.256 | +0.074, CI [-0.019, +0.165], P = 0.94 |
+| curveball (33) | 0.507 | -0.04 | panel too small to read |
+
+On sliders this is the largest single increment measured anywhere in this
+project, it is essentially orthogonal to Stuff+ (r = 0.04), and it is more
+reliable than fastball Location+. The story is coherent: a secondary pitch
+works when it tunnels off the fastball (same line, more depth) and stays
+unpredictable (used sparingly, not telegraphed at two strikes).
+
+Label it honestly: this is a THIRD construct - usage/deception - not stuff and
+not location (FRAMEWORK.md, one construct per score). And treat it as
+DISCOVERED, NOT CONFIRMED: the traits were screened on the same season-pair
+they are evaluated on. Sign replication across two pitch types is the only
+internal validation available; 2026 is the real test. Do not ship a score from
+this yet.
+
 ## Production summary
 
 - Report three scores: adjusted results, Stuff+ (Ridge), Location+ (pooled map),

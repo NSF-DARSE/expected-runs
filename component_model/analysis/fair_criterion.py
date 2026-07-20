@@ -37,7 +37,8 @@ USECOLS = ["PitchUID", "Date", "Pitcher", "PitcherId", "PitcherThrows", "Pitcher
            "TaggedPitchType", "PitchCall", "TaggedHitType", "ExitSpeed", "Angle",
            "Target", "SpinRate", "Extension", "HorzBreak", "InducedVertBreak",
            "EffectiveVelo", "RelHeight", "RelSide", "vertbreakdiff", "horzbreakdiff",
-           "velocity_differential", "PlateLocSide", "PlateLocHeight", "League"]
+           "velocity_differential", "PlateLocSide", "PlateLocHeight", "League",
+           "GameID", "Inning", "Top/Bottom", "PAofInning", "PitchofPA"]
 
 RIDGE_ALPHA = 10
 BATTER_K = 200

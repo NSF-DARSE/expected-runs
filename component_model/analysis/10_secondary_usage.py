@@ -1,18 +1,25 @@
-"""10: What predicts secondary-pitch outcomes beyond stuff? A usage/deception
-composite.
+"""10: What predicts secondary-pitch outcomes beyond stuff? A deployment
+composite (revealed trust).
 
 Script 09 showed season-average location has no predictive validity for
 secondary pitches. This script screens season-level usage and fastball-relative
 location traits (reliability gate first, per protocol), then tests an
-equal-weight composite of the four traits whose SIGNS replicated across the
-slider and changeup panels:
-  + sep_z  : thrown below the pitcher's own fastball band (depth off the FB line)
-  - sep_x  : horizontal separation off the fastball's line (tunneling penalty)
-  - usage  : share of all pitches (overexposure penalty)
-  - two_strike_share : two-strike-only predictability penalty
-Composite is a new labeled component (usage/deception), NOT stuff and NOT
-location -- see FRAMEWORK.md score design principles. EXPLORATORY: traits were
-selected on this same season-pair; treat as discovered-not-confirmed until 2026.
+equal-weight composite of the four whose directions replicate across the slider
+and changeup panels. The composite below is ORIENTED LIKE THE CRITERION
+(higher = more runs = worse), so it enters blends alongside the other
+run-value predictors. Read against that convention, better outcomes follow
+from HIGHER usage, HIGHER two-strike share, MORE horizontal separation off the
+pitcher's fastball line (sep_x), and NOT sitting far below the fastball band
+(sep_z). Do not read the composite's component signs as "good deployment"
+directions -- see RESULTS.md for the corrected interpretation.
+
+Interpretation per the causality probes (RESULTS.md): mostly a REVEALED-TRUST
+proxy for unmeasured pitch quality (usage effect vanishes under arsenal
+controls; within-pitcher first differences are null), not a coachable lever;
+sep_x is the only trait with a causal-looking within-pitcher signal.
+Composite is a new labeled component (deployment), NOT stuff and NOT location
+-- see FRAMEWORK.md score design principles. EXPLORATORY: traits were selected
+on this same season-pair; treat as discovered-not-confirmed until 2026.
 """
 import numpy as np
 import pandas as pd
@@ -68,7 +75,7 @@ for ptype in TYPES:
 
     comp24 = (fc.z(a["sep_z"]) - fc.z(a["sep_x"]) - fc.z(a["usage"]) - fc.z(a["two_strike_share"])) / 4
     comp25 = (fc.z(b["sep_z"]) - fc.z(b["sep_x"]) - fc.z(b["usage"]) - fc.z(b["two_strike_share"])) / 4
-    print(f"\nusage/deception composite: rel={fc.R(comp24, comp25):.3f}  "
+    print(f"\ndeployment composite (criterion-oriented): rel={fc.R(comp24, comp25):.3f}  "
           f"val={fc.R(comp24, b['C2']):.3f}/{fc.RS(comp24, b['C2']):.3f}  "
           f"corr w/ ridge={fc.R(comp24, a['ridge']):.3f}")
     for nm, p in [("results", fc.z(a["C2"])), ("ridge", fc.z(a["ridge"])),

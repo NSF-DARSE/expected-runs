@@ -158,14 +158,15 @@ on average over a season. Production implication: show Location+ for fastballs;
 do not surface a season-level Location+ for secondary pitches, and score
 secondary pitch quality from Stuff+ (which is MORE predictive there).
 
-## Secondary pitches: a usage/deception component (script 10, EXPLORATORY)
+## Secondary pitches: a deployment component (script 10, EXPLORATORY)
 
 If season-average location does not predict secondary-pitch outcomes, what
 does? A reliability-gated screen of usage and fastball-relative location traits
-found four whose signs replicate across the slider and changeup panels:
-thrown below the pitcher's own fastball band helps (+); horizontal separation
-off the fastball's line hurts (-); heavier usage hurts (-); two-strike-only
-predictability hurts (-). The equal-weight composite of the four:
+found four whose directions replicate across the slider and changeup panels.
+Read against the run-value criterion (lower = better), a secondary pitch does
+BETTER next year when it is used more overall, used more at two strikes, thrown
+with MORE horizontal separation off the pitcher's fastball line, and not buried
+far below the fastball band. The equal-weight composite of the four:
 
 | pitch (n) | composite rel | composite validity | adds over results+Stuff+ |
 |---|---|---|---|
@@ -175,14 +176,37 @@ predictability hurts (-). The equal-weight composite of the four:
 
 On sliders this is the largest single increment measured anywhere in this
 project, it is essentially orthogonal to Stuff+ (r = 0.04), and it is more
-reliable than fastball Location+. The story is coherent: a secondary pitch
-works when it tunnels off the fastball (same line, more depth) and stays
-unpredictable (used sparingly, not telegraphed at two strikes).
+reliable than fastball Location+.
 
-Label it honestly: this is a THIRD construct - usage/deception - not stuff and
-not location (FRAMEWORK.md, one construct per score). And treat it as
+Interpretation (settled by the causality probes below): this is mostly
+REVEALED TRUST, not a deception skill. Pitchers and coaches allocate usage
+based on quality they observe and our features do not, so usage is a proxy for
+unmeasured pitch quality. Consistent with that reading: (1) the usage trait's
+effect mostly disappears when the pitcher's own-fastball quality and own-pitch
+stuff are partialled out (0.16 -> 0.06); (2) within-pitcher first differences
+are null - changing deployment from 2024 to 2025 did not change outcomes
+(r = -0.04) - which is what a stable proxy produces and a causal lever does
+not; (3) the composite predicts through next-year whiff rate, the channel a
+quality proxy should flow through. The one exception is horizontal separation
+off the fastball line (sep_x): pitchers who increased it saw outcomes improve
+in both panels (r = -0.25 and -0.22 with improvement), the only trait with a
+causal-looking within-pitcher signal.
+
+Practical consequence: the composite is a legitimate FORECASTING component and
+must not be read as coaching advice. "Throw it more and it will get better" is
+exactly backwards - the causality runs from quality to usage. Only sep_x has
+any prescriptive standing, and one first-difference result is not enough to
+coach from.
+
+A prior version of this section described the trait directions inverted (as a
+tunneling/overexposure story). The predictive numbers were unaffected -
+orientation cancels in correlations and blends - but the narrative was wrong;
+it was caught by an inverse-selection question in review.
+
+Label it honestly: this is a THIRD construct - deployment/revealed trust - not
+stuff and not location (FRAMEWORK.md, one construct per score). And treat it as
 DISCOVERED, NOT CONFIRMED: the traits were screened on the same season-pair
-they are evaluated on. Sign replication across two pitch types is the only
+they are evaluated on. Direction replication across two pitch types is the only
 internal validation available; 2026 is the real test. Do not ship a score from
 this yet.
 

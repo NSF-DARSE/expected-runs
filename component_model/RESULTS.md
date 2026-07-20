@@ -126,13 +126,48 @@ real incremental information.
 Note the models are trained on league-wide outcomes; what they never see is the
 scored pitcher's own results.
 
+## Secondary pitch types: the pattern reverses (script 09)
+
+Running the identical protocol per pitch type (per-type Ridge, per-type maps,
+per-type criterion; panel = 100+ of the type in both years):
+
+| pitch (n) | criterion rel | Stuff+ validity | Location+ rel | Location+ validity |
+|---|---|---|---|---|
+| four-seam (699) | 0.304 | 0.235 | 0.479 | 0.290 |
+| slider (216) | 0.174 | 0.126 | 0.434 | 0.020 |
+| changeup (103) | 0.181 | 0.219 | 0.501 | 0.013 |
+| curveball (33) | -0.09 | 0.347 | 0.393 | 0.109 |
+
+Two reversals of the four-seam picture. First, secondary-pitch Location+ is
+reliable but NOT valid: where a pitcher throws his slider repeats year to year
+(0.43), but it predicts next-year slider outcomes at ~0. Adding it to the blend
+makes prediction worse. This is not a handedness artifact: batter-mirrored and
+platoon-conditioned maps score the same (slider 0.020 -> 0.032; changeup stays
+at ~0), while the four-seam map is unaffected by the same variants. Second,
+Stuff+ gains importance on secondaries - movement quality predicts breaking-ball
+outcomes better than season-average location does.
+
+The count-conditioning hypothesis (that location-given-count would matter more
+for breaking/offspeed) is moot on this data: no count variant rescues a location
+score that has no validity to begin with (all diffs within ~1 SE; the curveball
+panel is too small to read at all).
+
+Working interpretation, pending 2026 data: secondary-pitch value lives in the
+pitch's physical quality and its usage/sequencing context, not in where it sits
+on average over a season. Production implication: show Location+ for fastballs;
+do not surface a season-level Location+ for secondary pitches, and score
+secondary pitch quality from Stuff+ (which is MORE predictive there).
+
 ## Production summary
 
 - Report three scores: adjusted results, Stuff+ (Ridge), Location+ (pooled map),
-  plus Pitching+ = equal-weight z blend, all at 100 +/- 15.
+  plus Pitching+ = equal-weight z blend, all at 100 +/- 15. Script 08 emits the
+  staff scoresheet (scores, whiff, fingerprints, flags, explanation grids).
 - Pitch-level explanations use the count-conditioned map.
 - Location+ carries a small-sample flag below ~50 FF, caution to 99.
+- Location+ is a fastball score: do not surface it for secondary pitches
+  (reliable but zero validity there); secondaries are graded by Stuff+.
 - Ceiling check: criterion reliability caps attainable validity at
   ~sqrt(0.304) = 0.55; the stack reaches 0.392 (~70% of ceiling).
-- Open items: extend to breaking/offspeed (count-conditioning expected to matter
-  more there), joint model vs blend, 2026 replication.
+- Open items: what does predict secondary-pitch outcomes beyond stuff
+  (usage/sequencing context), joint model vs blend, 2026 replication.

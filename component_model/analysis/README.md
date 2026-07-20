@@ -30,6 +30,8 @@ Requires: pandas, pyarrow, numpy, scipy, scikit-learn.
 | `05_scaling_combine.py` | Are the 100±15 scales and the equal-weight blend honest? | 04 (writes count_scores.parquet) |
 | `06_sample_floor.py` | How many FF before a Location+ read is trustworthy? (`--team` for staff flags) | 01 pass |
 | `07_models_vs_results.py` | Do the models alone out-predict the stat line? | 04 |
+| `08_staff_scores.py` | Staff scoresheet: scores, flags, explanation grids (`--team`) | 01 pass |
+| `09_secondary_pitches.py` | Does the stack transfer to sliders/changeups/curves? | 01 pass |
 
 **Run 01 first, every time the source data changes.** If its prints do not match
 the anchor table in RESULTS.md, stop and reconcile before trusting anything else.

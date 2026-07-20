@@ -134,14 +134,16 @@ def add_adjusted(df, K=BATTER_K):
 
 # ---------------- fixed Stuff+ reference ----------------
 
-def stuff_ridge(df):
-    """FF rows with complete features; adds ridge_pred (Ridge alpha=10, trained 2024)."""
-    ff = df[df["is_ff"]].dropna(subset=FEATS + ["Target"]).copy()
+def stuff_ridge(df, return_model=False, pitch_mask=None):
+    """Rows of one pitch type with complete features; adds ridge_pred
+    (Ridge alpha=10, trained 2024). pitch_mask defaults to four-seams."""
+    mask = df["is_ff"] if pitch_mask is None else pitch_mask
+    ff = df[mask].dropna(subset=FEATS + ["Target"]).copy()
     train = ff[ff["year"] == 2024]
     model = make_pipeline(StandardScaler(), Ridge(alpha=RIDGE_ALPHA))
     model.fit(train[FEATS].values, train["Target"].values)
     ff["ridge_pred"] = model.predict(ff[FEATS].values)
-    return ff
+    return (ff, model) if return_model else ff
 
 
 def panel_ids(ff, min_n=PANEL_MIN_FF):

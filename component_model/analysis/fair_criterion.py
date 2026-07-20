@@ -16,6 +16,22 @@ Data rules (licensed TrackMan, Level II): scripts read the source CSV from
 STUFFPLUS_DATA (or --data) and cache/write only under STUFFPLUS_WORKDIR
 (or --workdir), which must live outside the repository or stay gitignored.
 Never commit the cache, any derived values, or per-pitcher output.
+
+SIGN CONVENTIONS -- do not guess; an inverted trait narrative shipped once
+already (see RESULTS.md, deployment section) before review caught it:
+  - Target, xT, adjT, ridge_pred, and every location-map value are EXPECTED
+    RUNS from the PITCHER's perspective: LOWER = BETTER for the pitcher.
+  - A predictor is oriented consistently when it correlates POSITIVELY with a
+    future run-value criterion. A raw trait predicts BETTER outcomes when its
+    correlation with the criterion is NEGATIVE. Read every trait-screen sign
+    against this before writing a word of interpretation.
+  - Display scores negate into higher-is-better: X100 = 100 + 15 * z where
+    z = -(value - mu) / sd. Convert frames ONLY at the display layer, never
+    mid-analysis, and never mix frames in one table.
+  - Whiff rate is the lone higher-is-better raw quantity; hard-hit rate is
+    lower-is-better.
+When defining any new trait, score, or composite, state its orientation in a
+comment at the definition site.
 """
 import argparse
 import os

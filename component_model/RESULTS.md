@@ -198,6 +198,16 @@ exactly backwards - the causality runs from quality to usage. Only sep_x has
 any prescriptive standing, and one first-difference result is not enough to
 coach from.
 
+The revealed-trust reading has one productive internal use: usage the measured
+quality CANNOT explain flags where staff knowledge and the model disagree.
+Script 11 computes it - an arsenal-relative share model (a pitch competes with
+the pitcher's own other pitches, never the league; fastball identity is modeled
+as primary/secondary slots so sinker-first pitchers are not fake flags) fit on
+3,556 D1 pitchers, R^2 0.68, residual sd ~10 share pts. The residual feeds a
+coach-facing disagreement queue ("Usage Gap Board"), where each resolved case
+is logged and scored against next season - both a conversation tool and a
+curated sample of what the current features miss.
+
 A prior version of this section described the trait directions inverted (as a
 tunneling/overexposure story). The predictive numbers were unaffected -
 orientation cancels in correlations and blends - but the narrative was wrong;

@@ -1,14 +1,24 @@
-# TrackMan Data API client (vertical slice)
+# TrackMan Data API client
 
-De-risking slice that proves we can pull UD Baseball pitch data from the
-TrackMan Data API instead of the Google Drive CSV folder. It authenticates,
-discovers game sessions, pulls one session's plays + balls, and reports how the
-JSON lines up with the 60 columns the model pipeline expects.
+Pulls UD Baseball pitch data from the TrackMan Data API instead of the Google
+Drive CSV folder. Two slices so far:
 
-This is not the production ingestion path. The plays-to-balls join, the
-flatten-to-60-columns mapping, and the Google Drive replacement come in a later
-slice, once we have seen the real data shape. Design:
-`docs/superpowers/specs/2026-07-21-trackman-api-slice-design.md`.
+1. **Smoke test** (`smoke_test.py`) — authenticates, discovers game sessions,
+   pulls one session's plays + balls, and reports how the JSON lines up with
+   the 60 columns the model pipeline expects.
+2. **Flattener** (`flatten.py` + `golden_diff.py`) — joins plays to balls and
+   flattens the JSON into the raw-CSV-shaped frame the existing pipeline
+   consumes unchanged. Validated by golden diff: two 2025 games (home and
+   away) flattened from the API, run through the pipeline's own
+   runner-state/game-state/Target logic, and compared row-for-row against the
+   same games in `Final_Target_Calc_*.csv` — every column exact through the
+   Target stage (physics float dust < 1e-6 relative; one documented
+   provenance diff on RunsRemaining, see `golden_diff.py` docstring).
+
+Remaining before production cutover: season backfill via 30-day discovery
+windows, output-format decision, a parallel run against the Drive source with
+the script 01 anchor check, and retry/backoff + token-renewal hardening.
+Design: `docs/superpowers/specs/2026-07-21-trackman-api-slice-design.md`.
 
 ## Setup
 
@@ -52,9 +62,22 @@ TrackMan can optionally restrict which IPs may call the Data API. If the smoke
 test authenticates but discovery/data calls return an authorization/forbidden
 error, UD's egress IP likely needs to be registered with your TrackMan rep.
 
+## Run the golden diff
+
+```
+python trackman_api/golden_diff.py --data-dir "<folder with Final_Target_Calc_*.csv>"
+python trackman_api/golden_diff.py --data-dir ... --game-id 20250510-MonmouthU-2
+```
+
+`--data-dir` is the Drive share folder holding the final dataset (ask Jack).
+Output is aggregate-only (row counts, per-column verdicts, max deltas) — no
+licensed pitch-level values are printed.
+
 ## Files
 
 - `config.py` — loads/validates the two secrets and base URLs.
 - `auth.py` — OAuth client_credentials grant.
-- `smoke_test.py` — the end-to-end proof.
+- `smoke_test.py` — end-to-end proof: auth, discovery, one session's data.
+- `flatten.py` — API JSON -> raw-CSV-shaped pitch frame (one game).
+- `golden_diff.py` — acceptance test: API-flattened game vs the final dataset.
 - `swagger.json` — the API's OpenAPI spec (source of truth for endpoints/auth).

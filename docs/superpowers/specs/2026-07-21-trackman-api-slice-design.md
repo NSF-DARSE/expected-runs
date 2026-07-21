@@ -3,6 +3,14 @@
 Date: 2026-07-21
 Status: approved for implementation
 
+Amendment (same day, after obtaining portal credentials + swagger.json): the
+Data API uses the OAuth client_credentials grant at
+`https://login.trackman.com/connect/token` with TWO secrets (client id +
+client secret from the portal's "Data integration clients" page), not the
+password grant / four secrets described below from the Quick Start Guide v2.5
+PDF. There is no refresh token in this flow; renewal is a new token request.
+`trackman_api/swagger.json` is the endpoint source of truth.
+
 ## Purpose
 
 Prove, end to end, that we can pull UD Baseball pitch data from the TrackMan

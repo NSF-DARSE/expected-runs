@@ -213,3 +213,7 @@ secrets/
 .DS_Store
 Thumbs.db
 .claude/settings.local.json
+
+# TrackMan licensed API docs -- never commit to the public repo
+trackman_api/swagger.json
+trackman_api/*.pdf

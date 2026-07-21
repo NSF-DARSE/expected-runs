@@ -130,6 +130,37 @@ print("residual (share pts): sd=%.1f  p5=%.1f  p95=%.1f" %
       (fit["gap"].std(), fit["gap"].quantile(.05), fit["gap"].quantile(.95)))
 
 # ---- board payload for the requested team ----
+# Evidence z-scores: an outcome only "backs the staff" (or the model) past 1 SD of
+# binomial noise, and whiff is compared ARSENAL-RELATIVE -- this pitch's whiff above
+# its pitch-type D1 average vs the same excess pooled over the pitcher's other
+# pitches (swing-weighted), since that is the choice usage represents.
+fit["wavg_t"] = fit["ptype"].map(wavg)
+
+def whiff_z_arsenal(r, others):
+    # orientation: POSITIVE z = this pitch misses more bats than the pitcher's
+    # other pitches (type-adjusted) beyond noise -- evidence FOR staff trust.
+    oth = others[others["swings"] > 0]
+    if pd.isna(r["whiff"]) or r["swings"] < 5 or not len(oth):
+        return None
+    excess_oth = ((oth["whiff"] - oth["wavg_t"]) * oth["swings"]).sum() / oth["swings"].sum()
+    p_oth = (oth["whiff"] * oth["swings"]).sum() / oth["swings"].sum()
+    # Jeffreys-adjusted probs for the SE so p=0 or 1 does not zero the variance
+    p1e = (r["whiff"] * r["swings"] + 0.5) / (r["swings"] + 1)
+    p0e = (p_oth * oth["swings"].sum() + 0.5) / (oth["swings"].sum() + 1)
+    se = np.sqrt(p1e * (1 - p1e) / r["swings"] + p0e * (1 - p0e) / oth["swings"].sum())
+    if se == 0:
+        return None
+    return round(float(((r["whiff"] - r["wavg_t"]) - excess_oth) / se), 1)
+
+def hh_z_d1(r):
+    # orientation: NEGATIVE z = less hard contact than D1 average for the type
+    # beyond noise -- evidence FOR the pitch (hard-hit is lower-is-better).
+    if pd.isna(r["hh"]) or r["bip_ev"] < 5:
+        return None
+    h_avg = float(hhavg[r["ptype"]])
+    se = np.sqrt(h_avg * (1 - h_avg) / r["bip_ev"])
+    return round(float((r["hh"] - h_avg) / se), 1)
+
 d = fit[(fit["team"] == args.team) & (fit["n"] >= MIN_BOARD)].copy()
 d["absgap"] = d["gap"].abs()
 d = d.sort_values("absgap", ascending=False)
@@ -149,6 +180,7 @@ for _, r in d.iterrows():
         whiff=(round(float(r["whiff"]), 3) if pd.notna(r["whiff"]) else None),
         swings=int(r["swings"]), hh=(round(float(r["hh"]) * 100) if pd.notna(r["hh"]) else None),
         hhavg=round(float(hhavg[r["ptype"]]) * 100), wavg=round(float(wavg[r["ptype"]]) * 100),
+        whiff_z=whiff_z_arsenal(r, others), hh_z=hh_z_d1(r), n_bip=int(r["bip_ev"]),
         n=int(r["n"]), use=round(r["share"] * 100), exp=round(r["exp"] * 100), trade=trade))
     print(f"{r['name']:<24}{r['ptype']} n={int(r['n']):>4} share={r['share']*100:>4.0f}% "
           f"exp={r['exp']*100:>4.0f}% gap={r['gap']:>+5.1f} Stuff+={r['Stuff100']:>4.0f} "

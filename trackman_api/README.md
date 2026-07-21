@@ -6,7 +6,14 @@ Drive CSV folder. Two slices so far:
 1. **Smoke test** (`smoke_test.py`) — authenticates, discovers game sessions,
    pulls one session's plays + balls, and reports how the JSON lines up with
    the 60 columns the model pipeline expects.
-2. **Flattener** (`flatten.py` + `golden_diff.py`) — joins plays to balls and
+2. **Backfill** (`backfill.py`) — discovers verified games over a date range
+   (auto-chunked into 30-day windows) and writes one CSV per game into the
+   `base/year/month/day/CSV/` layout the pipeline already reads, so a
+   backfill is a drop-in replacement for the Drive folder. Resumable
+   (re-running skips games already on disk), bounded retry with exponential
+   backoff, token auto-renewal. Validated on a DEL_BLU week: all six games
+   pass the golden diff after an on-disk CSV round trip.
+3. **Flattener** (`flatten.py` + `golden_diff.py`) — joins plays to balls and
    flattens the JSON into the raw-CSV-shaped frame the existing pipeline
    consumes unchanged. Validated by golden diff: two 2025 games (home and
    away) flattened from the API, run through the pipeline's own
@@ -15,10 +22,10 @@ Drive CSV folder. Two slices so far:
    Target stage (physics float dust < 1e-6 relative; one documented
    provenance diff on RunsRemaining, see `golden_diff.py` docstring).
 
-Remaining before production cutover: season backfill via 30-day discovery
-windows, output-format decision, a parallel run against the Drive source with
-the script 01 anchor check, and retry/backoff + token-renewal hardening.
-Design: `docs/superpowers/specs/2026-07-21-trackman-api-slice-design.md`.
+Remaining before production cutover: full 2024-2025 backfill (~11.7k games,
+a long overnight run), a parallel rebuild of the final dataset from the
+backfilled tree, and the script 01 anchor check against the Drive-sourced
+build. Design: `docs/superpowers/specs/2026-07-21-trackman-api-slice-design.md`.
 
 ## Setup
 
@@ -61,6 +68,18 @@ cannot exceed 30 days (an API limit).
 TrackMan can optionally restrict which IPs may call the Data API. If the smoke
 test authenticates but discovery/data calls return an authorization/forbidden
 error, UD's egress IP likely needs to be registered with your TrackMan rep.
+
+## Run a backfill
+
+```
+python trackman_api/backfill.py --from 2025-05-10 --to 2025-05-18 --out <local dir> --team DEL_BLU
+python trackman_api/backfill.py --from 2025-02-01 --to 2025-07-01 --out <local dir>   # all teams
+python trackman_api/backfill.py ... --dry-run    # discovery + counts only
+```
+
+Output must stay on local/UD-controlled storage (licensed Level II data).
+Interrupted runs resume with the same command. Budget roughly 10 seconds per
+game; a full season, all teams, is an overnight job.
 
 ## Run the golden diff
 

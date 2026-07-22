@@ -20,12 +20,14 @@ Two documented departures from a byte-for-byte diff:
     flattener owns: GameState construction, row order, the shift(-1) Target
     logic, and rounding.
   - RunsRemaining: the final dataset was built with an INCLUSIVE future-runs
-    sum (current pitch's runs counted), while repo Helpers.py has been
-    exclusive (runs[i+1:]) since Oct 2025 -- the build used a divergent local
-    copy. Mismatches are accepted only if they exactly match that signature
-    (csv == repo_value + RunsScored, on scoring pitches only) and are
-    reported as KNOWN-DIFF. RunsRemaining feeds only the ER-table build, not
-    Target.
+    sum (current pitch's runs counted) -- a deliberate July 2026 correction
+    agreed during the target-definition fix, and the right convention for run
+    expectancy (Target = RS + ER_next - ER assumes it). Repo Helpers.py still
+    carries the older exclusive sum (runs[i+1:]); it should be updated to
+    match the dataset. Until then, mismatches are accepted only if they
+    exactly match that signature (csv == repo_value + RunsScored, on scoring
+    pitches only) and are reported as KNOWN-DIFF. RunsRemaining feeds only
+    the ER-table build, not Target.
 
 Usage:
     python trackman_api/golden_diff.py --data-dir "<folder with Final_Target_Calc_*.csv and GameState_Summary.csv>"

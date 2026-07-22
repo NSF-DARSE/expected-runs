@@ -233,3 +233,67 @@ this yet.
   ~sqrt(0.304) = 0.55; the stack reaches 0.392 (~70% of ceiling).
 - Open items: what does predict secondary-pitch outcomes beyond stuff
   (usage/sequencing context), joint model vs blend, 2026 replication.
+
+## 2026 replication
+
+Everything above was one season-pair (2024->2025, n=699). The 2026 season
+(FTP mirror -> API-validated build, frozen 2024-25 ExpectedRuns table,
+inclusive RunsRemaining matching the original build) allows the promised
+replication: the identical suite re-run on 2025->2026 via
+`--years 2025,2026` (year-role relabeling in `fair_criterion.py`; train/eval
+labels in script output then mean 2025/2026). Because the national feed's
+level mix shifted (D2 share roughly doubled), all headline calls below are
+read from D1-only control runs (`--level D1`; panels n=649 old pair, n=825
+new pair); all-levels runs agree directionally except where noted.
+
+REPLICATED (adopt as standing findings, no longer provisional):
+- Criterion structure: C0 < C1 < C2 ordering for reliability and blend
+  validity; C1-C2 cross-corr 0.986/0.987.
+- Stuff+ increment over results+Location+ (D1: P=1.000 old, 0.998 new) and
+  Location+ increment over results (D1: P=0.994 old, 0.983 new). The
+  all-levels Location+ CI includes zero in the new pair -- the increment is a
+  D1 signal diluted by feed expansion, not a failed effect.
+- Models-only (no results information) beat raw results (D1: +0.195 P=1.000
+  old; +0.114, CI [+0.040,+0.189], P=0.999 new); the margin over adjusted
+  results stays positive but borderline in both pairs (P=0.992 old D1,
+  0.957 new D1).
+- Count-conditioning decomposition: raw count map beats pooled on
+  reliability (P=0.999), the gain is count occupancy, location-given-count
+  ties pooled, and the 3-way blend advantage collapses (+0.006 new vs +0.005
+  old) -- the one-construct-per-score decision to keep pitcher-level
+  Location+ count-relative is confirmed. (Tuned shrinkage moved m=5 -> m=2;
+  scheme winner count12 unchanged.)
+- Scaling: the college stuff-vs-location SD inversion (ratio 0.78 vs 0.80),
+  honest Location+ scale (~100+/-19 both pairs), equal-weight z blend still
+  beats reliability weighting (P=0.987).
+- Sample floor: n0 = 51 vs ~52; identical flag tiers.
+- Expected-usage share model: R^2 0.647 vs 0.68, residual sd ~10 pts.
+- Secondary pitches: adding Location+ to slider/changeup blends still makes
+  prediction worse; Location+ remains a fastball score.
+
+ATTENUATED (real, not composition -- persists under D1-only):
+- Absolute levels are ~10% lower across the board in the new pair: C2
+  reliability 0.304 -> 0.268, Stuff+ Ridge reliability 0.901 -> 0.828, ridge
+  validity 0.282 -> 0.214 (all D1). With SE ~0.037 these are 1-2 SE moves,
+  consistent in direction across every score, so treated as environment/
+  measurement drift to monitor rather than a design problem.
+- Secondary-pitch Location+ validities are no longer ~0 (slider 0.058,
+  changeup 0.150, curveball 0.245 all-levels) but remain well below the
+  four-seam level; the curveball criterion-reliability sign flip (-0.09 ->
+  +0.34) says the old n=33 panel was noise, as flagged.
+
+REFUTED (withdraw):
+- The deployment/revealed-trust composite. Its 2024->2025 numbers (slider
+  validity 0.300, increment over results+Stuff+ +0.121 P=1.000) collapse in
+  2025->2026 to validity 0.006/0.027 (slider/changeup, D1) with the
+  increment flipping negative (slider -0.053, changeup -0.014, curveball
+  -0.131 with CI excluding zero). Individual trait signs (usage, sep_x) are
+  unstable across pitch types. The composite is still reliable (~0.6) -- a
+  stable pitcher attribute -- but it does not predict future run value. The
+  DISCOVERED-NOT-CONFIRMED label and the do-not-ship gate did their job;
+  deployment traits stay out of every score. The Usage Gap Board is
+  unaffected (it rests on the share model, which replicated).
+
+Replication artifacts: `--years`/`--level` parameterization in
+`fair_criterion.py`; per-script logs and the full metric-by-metric comparison
+(replication_comparison.md) in the analysis workdir (Level II, not committed).

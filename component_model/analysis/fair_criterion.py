@@ -54,7 +54,7 @@ USECOLS = ["PitchUID", "Date", "Pitcher", "PitcherId", "PitcherThrows", "Pitcher
            "Target", "SpinRate", "Extension", "HorzBreak", "InducedVertBreak",
            "EffectiveVelo", "RelHeight", "RelSide", "vertbreakdiff", "horzbreakdiff",
            "velocity_differential", "PlateLocSide", "PlateLocHeight", "League",
-           "GameID", "Inning", "Top/Bottom", "PAofInning", "PitchofPA"]
+           "Level", "GameID", "Inning", "Top/Bottom", "PAofInning", "PitchofPA"]
 
 RIDGE_ALPHA = 10
 BATTER_K = 200
@@ -67,24 +67,63 @@ def paths():
     ap.add_argument("--data", default=os.environ.get("STUFFPLUS_DATA"))
     ap.add_argument("--workdir", default=os.environ.get("STUFFPLUS_WORKDIR"))
     ap.add_argument("--team", default="DEL_BLU")
+    ap.add_argument("--level", default=os.environ.get("STUFFPLUS_LEVEL"),
+                    help="Optional Level filter (e.g. D1). Default: all levels, "
+                         "matching the original 2024-2025 runs.")
+    ap.add_argument("--years", default=os.environ.get("STUFFPLUS_YEARS", "2024,2025"),
+                    help="Comma-separated train,eval year pair (default 2024,2025). "
+                         "A non-default pair is ROLE-RELABELED at load: the earlier "
+                         "year takes the 2024 (train) role and the later the 2025 "
+                         "(eval) role, so every downstream script applies the same "
+                         "method to the new pair unchanged. Downstream prints that "
+                         "say 2024/2025 then mean train-year/eval-year.")
     args, _ = ap.parse_known_args()
     if not args.data or not args.workdir:
         sys.exit("Set STUFFPLUS_DATA (source CSV) and STUFFPLUS_WORKDIR "
                  "(cache/output dir outside the repo), or pass --data/--workdir.")
+    args.year_pair = tuple(int(y) for y in args.years.split(","))
+    if len(args.year_pair) != 2 or args.year_pair[0] >= args.year_pair[1]:
+        sys.exit("--years must be two ascending years, e.g. 2025,2026")
     os.makedirs(args.workdir, exist_ok=True)
     return args
 
 
+def _year_suffix(args):
+    pair = getattr(args, "year_pair", (2024, 2025))
+    tag = "" if pair == (2024, 2025) else f"_{pair[0]}_{pair[1]}"
+    level = getattr(args, "level", None)
+    if level:
+        tag += f"_{level}"
+    return tag
+
+
 def load_pitches(args):
-    """Source CSV -> deduped 2024/25 pitch frame, cached as parquet in workdir."""
-    cache = os.path.join(args.workdir, "pitches_cache.parquet")
+    """Source CSV -> deduped pitch frame for the year pair, cached as parquet.
+
+    For a non-default pair the 'year' column is ROLE-RELABELED (earlier year ->
+    2024, later -> 2025) so the numbered scripts' hardcoded train/eval years
+    replicate the method on the new pair verbatim. The real years are printed
+    loudly here and preserved in the cache filename.
+    """
+    pair = getattr(args, "year_pair", (2024, 2025))
+    cache = os.path.join(args.workdir, f"pitches_cache{_year_suffix(args)}.parquet")
     if os.path.exists(cache):
         return pd.read_parquet(cache)
     df = pd.read_csv(args.data, usecols=USECOLS)
     df = df.dropna(subset=["PitchUID"]).drop_duplicates(subset="PitchUID", keep="first")
     df["year"] = pd.to_datetime(df["Date"], errors="coerce").dt.year
-    df = df[df["year"].isin([2024, 2025])].copy()
+    df = df[df["year"].isin(pair)].copy()
     df["year"] = df["year"].astype(int)
+    level = getattr(args, "level", None)
+    if level:
+        before = len(df)
+        df = df[df["Level"] == level].copy()
+        print(f"*** LEVEL FILTER: {level} keeps {len(df)}/{before} rows ***")
+    if pair != (2024, 2025):
+        print(f"*** YEAR ROLE RELABELING: {pair[0]} -> '2024' (train role), "
+              f"{pair[1]} -> '2025' (eval role). All downstream 2024/2025 labels "
+              f"mean train/eval year. ***")
+        df["year"] = df["year"].map({pair[0]: 2024, pair[1]: 2025})
     df["is_lhp"] = (df["PitcherThrows"] == "Left").astype(float)
     df["is_lhb"] = (df["BatterSide"] == "Left").astype(float)
     df["is_inplay"] = df["PitchCall"] == "InPlay"
@@ -172,7 +211,7 @@ def panel_ids(ff, min_n=PANEL_MIN_FF):
 def ff_panel(args):
     """Full chain with caching: slim FF pitch frame with xT, adjT, ridge_pred,
     plate location, count, and panel membership. This is what scripts 02-07 load."""
-    cache = os.path.join(args.workdir, "ff_panel.parquet")
+    cache = os.path.join(args.workdir, f"ff_panel{_year_suffix(args)}.parquet")
     if os.path.exists(cache):
         return pd.read_parquet(cache)
     df = load_pitches(args)

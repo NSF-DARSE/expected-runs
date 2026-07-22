@@ -14,7 +14,15 @@ backfill just gets re-run with the same arguments.
 Usage:
     python trackman_api/backfill.py --from 2025-05-10 --to 2025-05-18 --out <dir>
     python trackman_api/backfill.py --from 2025-02-01 --to 2025-06-30 --out <dir> --team DEL_BLU
+    python trackman_api/backfill.py --refresh --out <dir>  # pull new games since latest on disk
     python trackman_api/backfill.py ... --dry-run          # discovery + counts only
+
+--refresh is the scheduled-incremental mode: it finds the latest game date
+already on disk and pulls from 7 days before that (skip-existing makes the
+overlap free; the lookback catches games that were still unverified on the
+previous run) through tomorrow. A game first verified more than 7 days after
+its date would be missed by refresh -- run an explicit --from/--to window to
+sweep those up occasionally.
 
 Data note: TrackMan data is licensed (Level II). The output directory must be
 local/UD-controlled storage, and this script prints only session counts and
@@ -38,7 +46,9 @@ from flatten import flatten_game
 _TIMEOUT = 60          # seconds per request
 _MAX_ATTEMPTS = 5      # per request, then fail loudly
 _BACKOFF_BASE = 2.0    # exponential backoff: 2, 4, 8, 16 s (+ jitter)
-_WINDOW_DAYS = 30      # API cap on a discovery window
+# The API caps a discovery window at 30 consecutive DATES counted
+# inclusively, so chunk by 29 days (a 30-day timedelta spans 31 dates).
+_WINDOW_DAYS = 29
 _RETRYABLE = {429, 500, 502, 503, 504}
 
 
@@ -80,12 +90,16 @@ class ApiClient:
     @staticmethod
     def _sleep(attempt: int, resp) -> None:
         delay = _BACKOFF_BASE ** attempt + random.uniform(0, 1)
-        retry_after = resp.headers.get("Retry-After") if resp is not None else None
-        if retry_after:
-            try:
-                delay = max(delay, float(retry_after))
-            except ValueError:
-                pass
+        if resp is not None and resp.status_code == 429:
+            # TrackMan's discovery quota outlasts a seconds-scale backoff;
+            # escalate to a minutes-scale wait (still bounded by _MAX_ATTEMPTS).
+            delay = max(delay, 45.0 * attempt)
+            retry_after = resp.headers.get("Retry-After")
+            if retry_after:
+                try:
+                    delay = max(delay, float(retry_after))
+                except ValueError:
+                    pass
         time.sleep(delay)
 
     def discover(self, date_from: str, date_to: str) -> list[dict]:
@@ -132,6 +146,24 @@ def wanted(session: dict, team: str | None) -> bool:
     return True
 
 
+def latest_date_on_disk(base: str) -> datetime | None:
+    """Latest year/month/day date that has a CSV dir with at least one game."""
+    latest = None
+    for year in sorted(d for d in os.listdir(base) if d.isdigit()):
+        ydir = os.path.join(base, year)
+        for month in sorted(d for d in os.listdir(ydir) if d.isdigit()):
+            mdir = os.path.join(ydir, month)
+            for day in sorted(d for d in os.listdir(mdir) if d.isdigit()):
+                csv_dir = os.path.join(mdir, day, "CSV")
+                if os.path.isdir(csv_dir) and any(
+                        f.endswith(".csv") for f in os.listdir(csv_dir)):
+                    found = datetime(int(year), int(month), int(day),
+                                     tzinfo=timezone.utc)
+                    if latest is None or found > latest:
+                        latest = found
+    return latest
+
+
 def out_path(base: str, game_id: str) -> str:
     """base/year/month/day/CSV/<gameID>.csv from the gameID's date prefix."""
     day = datetime.strptime(game_id.split("-", 1)[0], "%Y%m%d")
@@ -141,23 +173,41 @@ def out_path(base: str, game_id: str) -> str:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Backfill game CSVs from the TrackMan Data API")
-    p.add_argument("--from", dest="date_from", required=True, help="YYYY-MM-DD (UTC)")
-    p.add_argument("--to", dest="date_to", required=True, help="YYYY-MM-DD (UTC, exclusive)")
+    p.add_argument("--from", dest="date_from", help="YYYY-MM-DD (UTC)")
+    p.add_argument("--to", dest="date_to", help="YYYY-MM-DD (UTC, exclusive)")
+    p.add_argument("--refresh", action="store_true",
+                   help="Pull from 7 days before the latest game on disk through tomorrow")
     p.add_argument("--out", required=True, help="Output base directory (local storage)")
     p.add_argument("--team", help="Only games involving this team shortName (e.g. DEL_BLU)")
     p.add_argument("--dry-run", action="store_true",
                    help="Discover and count; write nothing")
     args = p.parse_args()
 
-    start = datetime.fromisoformat(args.date_from).replace(tzinfo=timezone.utc)
-    end = datetime.fromisoformat(args.date_to).replace(tzinfo=timezone.utc)
+    if args.refresh:
+        if args.date_from or args.date_to:
+            raise SystemExit("--refresh and --from/--to are mutually exclusive")
+        latest = latest_date_on_disk(args.out)
+        if latest is None:
+            raise SystemExit(f"No games on disk under {args.out}; "
+                             "seed with an explicit --from/--to window first.")
+        start = latest - timedelta(days=7)
+        end = datetime.now(timezone.utc) + timedelta(days=1)
+        print(f"refresh: latest game on disk {latest:%Y-%m-%d}, "
+              f"pulling {start:%Y-%m-%d} .. {end:%Y-%m-%d}")
+    else:
+        if not (args.date_from and args.date_to):
+            raise SystemExit("Provide --from and --to, or --refresh")
+        start = datetime.fromisoformat(args.date_from).replace(tzinfo=timezone.utc)
+        end = datetime.fromisoformat(args.date_to).replace(tzinfo=timezone.utc)
     if start >= end:
         raise SystemExit("--from must be before --to")
 
     client = ApiClient(load_config())
 
     sessions: dict[str, dict] = {}
-    for w_from, w_to in windows(start, end):
+    for i, (w_from, w_to) in enumerate(windows(start, end)):
+        if i:
+            time.sleep(5)  # pace discovery; its rate limit is stricter than data GETs
         found = client.discover(w_from, w_to)
         kept = [s for s in found if wanted(s, args.team)]
         print(f"window {w_from[:10]} .. {w_to[:10]}: "

@@ -74,12 +74,20 @@ error, UD's egress IP likely needs to be registered with your TrackMan rep.
 ```
 python trackman_api/backfill.py --from 2025-05-10 --to 2025-05-18 --out <local dir> --team DEL_BLU
 python trackman_api/backfill.py --from 2025-02-01 --to 2025-07-01 --out <local dir>   # all teams
+python trackman_api/backfill.py --refresh --out <local dir>   # new games since latest on disk
 python trackman_api/backfill.py ... --dry-run    # discovery + counts only
 ```
 
+`--refresh` is the scheduled-incremental mode: it pulls from 7 days before
+the latest game on disk (the lookback catches games verified late;
+skip-existing makes the overlap free) through tomorrow.
+
 Output must stay on local/UD-controlled storage (licensed Level II data).
 Interrupted runs resume with the same command. Budget roughly 10 seconds per
-game; a full season, all teams, is an overnight job.
+game; a full season, all teams, is an overnight job. The discovery endpoint
+has a much stricter rate quota than the data GETs (seemingly per-hour) --
+many-window discovery sweeps in quick succession will 429 even after the
+built-in minutes-scale backoff; wait and re-run.
 
 ## Run the golden diff
 

@@ -310,3 +310,14 @@ reliability gap (FanGraphs primer): MLB year-over-year reliability is ~0.73
 Stuff+ / ~0.48 Location+ -- college Location+ reliability (0.479) matches MLB
 almost exactly; what inverts at college is location's VALIDITY, not its
 repeatability.
+
+Follow-up (same day): is scatter bad in itself, or only as a proxy for bad
+misses? Conditioning on control (waste-rate terciles) and partialling waste
+out, on both D1 pairs: horizontal scatter is mostly wildness by another name
+(corr with waste 0.65-0.71; partial validity collapses to +0.04/+0.08).
+Vertical scatter keeps a modest residual penalty (partial +0.09/+0.11, ~2-3
+SE) but among the cleanest tercile it is inconsistent across pairs (-0.03
+then +0.11). Nowhere does more varied placement HELP -- even for clean
+pitchers, variation is at best neutral. Coaching translation: the actionable
+sin is the waste pitch, not variation per se; sd_x adds little beyond waste
+rate, sd_z a little.

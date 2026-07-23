@@ -22,12 +22,14 @@ Two documented departures from a byte-for-byte diff:
   - RunsRemaining: the final dataset was built with an INCLUSIVE future-runs
     sum (current pitch's runs counted) -- a deliberate July 2026 correction
     agreed during the target-definition fix, and the right convention for run
-    expectancy (Target = RS + ER_next - ER assumes it). Repo Helpers.py still
-    carries the older exclusive sum (runs[i+1:]); it should be updated to
-    match the dataset. Until then, mismatches are accepted only if they
-    exactly match that signature (csv == repo_value + RunsScored, on scoring
-    pitches only) and are reported as KNOWN-DIFF. RunsRemaining feeds only
-    the ER-table build, not Target.
+    expectancy (Target = RS + ER_next - ER assumes it). Main has carried the
+    inclusive sum since PR #12 (2026-07-11); this branch forks from before
+    that merge, so ITS Helpers.py copy is still exclusive (runs[i+1:]) and
+    the diff sees the mismatch. Mismatches are accepted only if they exactly
+    match that signature (csv == branch_value + RunsScored, on scoring
+    pitches only) and are reported as KNOWN-DIFF; once this branch rebases
+    onto current main the KNOWN-DIFF path goes quiet. RunsRemaining feeds
+    only the ER-table build, not Target.
 
 Usage:
     python trackman_api/golden_diff.py --data-dir "<folder with Final_Target_Calc_*.csv and GameState_Summary.csv>"

@@ -398,3 +398,20 @@ per 9, outs = OutsOnPlay + K):
   SD, on top of near-universal regression-to-mean improvement.
 Scripts: stuffplus_replication/build_portal_data.py (board data) and the
 matched/regression ad-hoc runs logged in the session transcript.
+
+Arsenal grade beats FF-only (2026-07-23, both D1 pairs): extending the
+grade to SL/CH/CB via the script-09 protocol (per-type ridge + per-type
+pooled location map; per-pitch predictions are in run units so the
+arsenal grade is just the pitcher's mean predicted value across all
+graded pitches - usage-weighted by construction; median arsenal
+coverage 94% vs ~65% FF-only). Effect on next-year RA9 per SD, holding
+RA9+K%+BB% fixed:
+  2025->2026 (n=543): FF-only +0.30 [+0.10,+0.53]; arsenal +0.42
+    [+0.20,+0.65]; joint model FF -0.00, arsenal +0.42 - the arsenal
+    grade SUBSUMES the FF-only grade.
+  2024->2025 (n=394): FF-only +0.18 [-0.10,+0.47]; arsenal +0.24
+    [-0.06,+0.54]; joint FF -0.05, arsenal +0.28. Same ordering and
+    same subsumption pattern, attenuated on the smaller pool.
+Verdict: adopt the arsenal grade for portal evaluation (theorized
+construct, direction replicated in both pairs, subsumption replicated).
+Scripts: stuffplus_replication/arsenal_grade_test.py / _2425.py.

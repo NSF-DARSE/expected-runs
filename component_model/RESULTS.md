@@ -321,3 +321,47 @@ then +0.11). Nowhere does more varied placement HELP -- even for clean
 pitchers, variation is at best neutral. Coaching translation: the actionable
 sin is the waste pitch, not variation per se; sd_x adds little beyond waste
 rate, sd_z a little.
+
+Follow-up 2 (2026-07-23): waste-type decomposition + stability of individual
+location features (both D1 pairs, pitchers with >=100 FF in both years,
+n=649 / n=825; script: stuffplus_replication/waste_and_feature_stability.py).
+
+Waste as the coach target. Waste rate is more predictive than either scatter
+axis (validity +0.258 / +0.210 vs sd_x +0.21/+0.19 which collapses when
+waste is partialled) and decently reliable (0.405 / 0.342, vs criterion
+self-reliability 0.304 / 0.268). It is also directly countable per outing.
+
+Waste TYPE matters, asymmetrically. Volume: horizontal misses are the bulk
+of waste (6.2-6.6% of all FF vs 1.2-1.5% low, 2.2-2.6% high). Per-pitch cost
+is roughly equal across types (+0.11 to +0.13 runs vs base). But as a
+pitcher TRAIT the types diverge sharply, replicated in both pairs:
+  waste-low   rel 0.37/0.34  validity +0.198/+0.198  (most validity-dense)
+  waste-horiz rel 0.49/0.46  validity +0.173/+0.151
+  waste-high  rel 0.45/0.39  validity +0.037/+0.001  (stable but PREDICTS NOTHING)
+High-miss rate correlates with BETTER stuff (corr with ridge_pred -0.07/-0.06,
+lower=better) while horizontal-miss rate goes with worse stuff (+0.17/+0.19):
+missing high is partly a byproduct of ride/velo arms attacking up, which
+offsets its per-pitch cost at the trait level. Second live example of
+stable-but-not-predictive (after the deployment composite). Coach board
+implication: count waste and split it; side-spray and buried misses are the
+concern, occasional overthrow-high is not a red flag.
+
+Stability of individual Location+ features (rel pair1/pair2, validity
+pair1/pair2; validity sign: positive = predicts worse outcomes):
+  sd_z        0.60/0.56   +0.17/+0.18
+  sd_x        0.57/0.52   +0.21/+0.19  (proxy for waste)
+  mean_z      0.54/0.53   -0.14/-0.11  (partial|waste -0.12/-0.13: living
+                                        higher helps INDEPENDENT of waste)
+  waste_pct   0.41/0.34   +0.26/+0.21
+  heart_pct   0.29/0.27   -0.27/-0.15  (partial|waste -0.15/-0.04: its
+                                        independent contribution is shaky)
+  chase_pct   0.18/0.16   +0.15/+0.14
+  shadow_pct  0.09/0.13   -0.08/-0.14  (near-noise as a trait despite being
+                                        41% of pitches)
+Design implication: Location+'s trait signal concentrates in waste
+avoidance, average height, and (as proxies) the scatter SDs; shadow% and
+chase% are mostly noise at the pitcher level and any attribution built on
+them attributes noise. The mixed reliability of these ingredients is
+consistent with Location+'s overall 0.48 -- the measurement-improvement
+lever is to weight the stable+valid features (waste, mean_z) and downweight
+the unstable ones.

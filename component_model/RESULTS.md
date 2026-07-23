@@ -380,3 +380,21 @@ attenuated but same direction in pair 2. Caveats: same-school population
 (portal transfers change park/defense/level context), FF-only panel, and
 portal candidates often have thinner samples than the >=100-pitch floor
 used here.
+
+Correction + coach-metric version (same day): a first coach-facing "control"
+(worst-line tercile split by grade tercile) was confounded -- the groups
+started 0.84 RA9 apart and ended 0.85 apart, so it displayed nothing beyond
+the stat line (caught by the coach-consumer review agent). The clean
+evidence, 2025->2026 D1, grade = Pitching+ (equal-z Stuff+ ridge +
+script-03 pooled-map Location+), coach metric RA9 (runs while on mound
+per 9, outs = OutsOnPlay + K):
+  Matched pairs (n=74, matched on 2025 RA9, caliper 0.30): baselines
+  8.27 vs 8.39; next year 6.24 (liked) vs 6.65 (disliked); K% 19.1->21.6
+  vs 16.5->18.1. Suggestive at this n (paired diff -0.41, SE 0.42).
+  Regression (n=543, bootstrap 4000): holding 2025 RA9 fixed, +1 SD of
+  grade = 0.39 runs better next-year RA9, 95% CI [0.19, 0.60]; holding
+  RA9 + K% + BB% all fixed, 0.30 +/- 0.11 (P=0.999). The model's edge
+  beyond the full surface line is real in coach units: ~0.3-0.4 RA9 per
+  SD, on top of near-universal regression-to-mean improvement.
+Scripts: stuffplus_replication/build_portal_data.py (board data) and the
+matched/regression ad-hoc runs logged in the session transcript.

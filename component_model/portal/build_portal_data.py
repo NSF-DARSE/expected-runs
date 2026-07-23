@@ -1,7 +1,12 @@
-"""Build portal buy-low board data (v2, post coach review).
+"""Build portal buy-low board data (v3).
 
-Adds: control cohorts (equally bad 2025 lines split by model grade),
-survivorship accounting, FB usage %, conference, handedness, role proxy.
+v2 added control cohorts, survivorship, FB usage %, conference, handedness,
+role proxy. v3 (2026-07-23) extends the arsenal to 7 graded types
+(+ Sinker/Cutter/Splitter, adopted via extended_types_test.py: paired diff
++0.03 SE 0.03 on 2024->25, +0.04 SE 0.02 on 2025->26) and emits a per-pitcher
+`detail` payload for the board tooltip: per pitch type, usage, within-type
+Stuff+/Location+ (100-scale), and top-3 physical feature drivers with exact
+ridge contributions (context features is_lhp/is_lhb excluded from display).
 Output: portal_board.json (aggregates only, no pitch-level data).
 """
 import pandas as pd, numpy as np, json
@@ -70,11 +75,13 @@ _sys.argv = ['x','--data','C:/Users/jackdav/stuffplus_replication/source_2025_20
 import fair_criterion as fc
 _args = fc.paths(); _pit = fc.load_pitches(_args); fc.add_xt(_pit)
 _sys.argv = _saved_argv
-_TYPES = [('FF', None), ('Slider','Slider'), ('ChangeUp','ChangeUp'), ('Curveball','Curveball')]
-_parts = []
+_TYPES = [('FF', None), ('Slider',{'Slider'}), ('ChangeUp',{'ChangeUp'}),
+          ('Curveball',{'Curveball'}), ('Sinker',{'Sinker','TwoSeamFastBall'}),
+          ('Cutter',{'Cutter'}), ('Splitter',{'Splitter'})]
+_parts, _store = [], {}
 for _name, _tag in _TYPES:
-    _mask = _pit['is_ff'] if _tag is None else (_pit['TaggedPitchType'] == _tag)
-    _pp = fc.stuff_ridge(_pit, pitch_mask=_mask)
+    _mask = _pit['is_ff'] if _tag is None else _pit['TaggedPitchType'].isin(_tag)
+    _pp, _model = fc.stuff_ridge(_pit, pitch_mask=_mask, return_model=True)
     _pp = _pp[_pp['PlateLocSide'].notna() & _pp['PlateLocHeight'].notna()].copy()
     fc.add_loc_bins(_pp)
     _lmap = fc.PooledLocationMap(_pp[(_pp['year']==2024) & _pp['xT'].notna()])
@@ -85,6 +92,14 @@ for _name, _tag in _TYPES:
     _g['q_stuff'] = _g.stuff - _p1.ridge_pred.mean()
     _g['q_loc'] = _g.locv - _p1['loc'].mean()
     _parts.append(_g.assign(ptype=_name).reset_index())
+    # tooltip detail inputs: pitcher feature means + exact ridge contributions
+    _fm = _p1.groupby('PitcherId')[fc.FEATS].mean()
+    _sc = _model.named_steps['standardscaler']; _rd = _model.named_steps['ridge']
+    _contrib = (_fm - _sc.mean_) / _sc.scale_ * _rd.coef_  # runs, lower = better
+    _ref = _g[_g.n >= 50]  # display-scale reference population for this type
+    _store[_name] = dict(g=_g, fm=_fm, contrib=_contrib,
+        ref_fm=_fm.loc[_ref.index],
+        sd_q=_ref.q_stuff.std(), sd_l=_ref.q_loc.std())
 _pt = pd.concat(_parts)
 _grp = _pt.groupby('PitcherId')
 gr = pd.DataFrame({
@@ -210,9 +225,44 @@ def row(r):
         bb25=round(100*r['bb_pct_25'],1), bb26=round(100*r['bb_pct_26'],1), d_bb=round(100*(r['bb_pct_26']-r['bb_pct_25']),1),
         wh25=round(100*r['whiff_pct_25'],1), wh26=round(100*r['whiff_pct_26'],1), d_wh=round(100*(r['whiff_pct_26']-r['whiff_pct_25']),1))
 
+# --- per-pitcher tooltip detail (board rows only) ---
+_PHYS = [x for x in fc.FEATS if x not in ('is_lhp','is_lhb')]
+_LAB = {'EffectiveVelo':('Velo','mph',1), 'InducedVertBreak':('IVB','in',1),
+        'HorzBreak':('Horz Break','in',1), 'SpinRate':('Spin','rpm',0),
+        'Extension':('Extension','ft',1), 'RelHeight':('Rel Height','ft',1),
+        'RelSide':('Rel Side','ft',1), 'vertbreakdiff':('IVB vs FB','in',1),
+        'horzbreakdiff':('HB vs FB','in',1), 'velocity_differential':('Velo vs FB','mph',1)}
+def pdetail(pid):
+    entries = []
+    for _name, _ in _TYPES:
+        st = _store[_name]
+        if pid not in st['g'].index or st['g'].loc[pid, 'n'] < 10:
+            continue
+        r = st['g'].loc[pid]
+        c = st['contrib'].loc[pid]
+        drivers = []
+        for ftr in sorted(_PHYS, key=lambda x: -abs(c[x]))[:3]:
+            lab, unit, nd = _LAB[ftr]
+            raw = st['fm'].loc[pid, ftr]
+            drivers.append(dict(f=lab, raw=round(raw, nd), unit=unit,
+                pctl=int(round(100*(st['ref_fm'][ftr] < raw).mean())),
+                pts=round(-15*c[ftr]/st['sd_q'], 1)))
+        entries.append(dict(pt=_name, n=int(r.n),
+            stuff=round(100 - 15*r.q_stuff/st['sd_q'], 1),
+            loc=round(100 - 15*r.q_loc/st['sd_l'], 1), drivers=drivers))
+    entries.sort(key=lambda e: -e['n'])
+    tot = sum(e['n'] for e in entries)
+    for e in entries:
+        e['use'] = round(100*e['n']/tot)
+    return entries
+
+_board = pd.concat([f.head(75), f.tail(25)])
+detail = {str(int(pid)): pdetail(int(pid)) for pid in _board.index}
+
 out = dict(built='2026-07-23', cohorts=summary,
            top=[row(r) for _, r in f.head(75).iterrows()],
-           bottom=[row(r) for _, r in f.tail(25).iterrows()])
+           bottom=[row(r) for _, r in f.tail(25).iterrows()],
+           detail=detail)
 with open('portal_board.json','w') as fh:
     json.dump(out, fh, indent=1)
 print('wrote portal_board.json')

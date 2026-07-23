@@ -8,12 +8,16 @@ documented there under the 2026-07-23 addenda.
   low / high misses) and year-over-year reliability + validity of each
   location feature inside Location+.
 - `build_portal_data.py` — the board data build: coach stats (RA9, K%, BB%,
-  whiff%) per pitcher-year for 2025 and 2026 D1, arsenal Pitching+ grades,
-  gap ranking, cohort/matched-pairs/regression proof blocks. One run
+  whiff%) per pitcher-year for 2025 and 2026 D1, arsenal Pitching+ grades
+  (7 pitch types), gap ranking, cohort/matched-pairs/regression proof
+  blocks, and the per-pitcher tooltip `detail` payload (within-type
+  Stuff+/Location+ plus exact ridge feature contributions). One run
   regenerates `portal_board.json` end to end.
 - `arsenal_grade_test.py` / `arsenal_grade_test_2425.py` — arsenal grade vs
   FF-only grade on the 2025->2026 and 2024->2025 D1 pairs (arsenal subsumes
   FF-only in both).
+- `extended_types_test.py` — 7-type arsenal (adds Sinker/Cutter/Splitter)
+  vs the 4-type baseline; adopted (paired diff +0.03/+0.04, never worse).
 - `arsenal_weighting_test.py` — four weighting schemes; mix-neutral
   (quality vs pitch-type average) adopted; learned per-type weights overfit.
 

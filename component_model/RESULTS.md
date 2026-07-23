@@ -446,3 +446,25 @@ stuff/loc +0.33/+0.09 in 2425, +0.36/+0.25 in 2526) while being
 uncorrelated (r~0.01). KEEP EQUAL WEIGHTS - consistent with the
 script-05 finding that equal-z beat reliability-weighted blends.
 Script: component_model/portal/blend_weight_test.py.
+
+Extended pitch coverage (2026-07-23): does grading Sinker (incl.
+two-seam), Cutter, and Splitter on top of FF/SL/CH/CB improve the
+arsenal grade? Same protocol (mix-neutral B, equal stuff/loc weights,
+effect = next-year RA9 per SD holding RA9+K+BB fixed), paired
+bootstrap on the difference so the comparison shares resamples:
+  2425: 4-type +0.31, 7-type +0.33, paired diff +0.03 SE 0.03
+  2526: 4-type +0.44, 7-type +0.48, paired diff +0.04 SE 0.02
+Small but consistent (never worse, ~2 SE on 2526), and it closes a
+systematic blind spot: sinker/cutter-primary pitchers are the
+soft-contact profile the v1 whiff model missed, and they were being
+graded on partial arsenals. Sweeper excluded (zero 2024 pitches, no
+training data in the 2425 pair). ADOPTED the 7-type grade. Board
+rebuilt: regression 0.54/SD holding RA9 [CI 0.35,0.74], 0.48 holding
+full line [0.26,0.71]; matched pairs (n=72) 8.21->6.05 vs 8.33->7.10
+(1.05-run gap, 57 vs 50 improved); liked top-50 9.41->6.16 (44/50
+improved); survivorship still equal (32.6% vs 33.2%). Board JSON now
+also carries a per-pitcher `detail` payload (per-type within-type
+Stuff+/Location+ and top-3 exact ridge feature contributions,
+context features excluded from display) for the board's "why we like
+him" tooltip. Scripts: component_model/portal/extended_types_test.py,
+build_portal_data.py (v3).

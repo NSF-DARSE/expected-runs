@@ -415,3 +415,22 @@ RA9+K%+BB% fixed:
 Verdict: adopt the arsenal grade for portal evaluation (theorized
 construct, direction replicated in both pairs, subsumption replicated).
 Scripts: stuffplus_replication/arsenal_grade_test.py / _2425.py.
+
+Arsenal weighting choice (same day): four schemes compared, learned
+weights fit ONLY on 2024->2025 and tested out-of-sample on 2025->2026
+(screening discipline). Effect per SD holding RA9+K+BB fixed
+(2425 / 2526):
+  A usage-weighted raw predictions      +0.25 / +0.42
+  B mix-neutral (quality vs type mean)  +0.31 / +0.44
+  C = B + n/(n+51) shrinkage            +0.31 / +0.43
+  D learned per-type weights            (fit) / +0.29  <- worst OOS;
+    fitted weights unstable (negative slider-stuff weight)
+Adopted B: within 1 SE of A predictively but better in BOTH pairs, and
+the cleaner construct - each pitch graded against its own type's
+population mean, so pitch MIX (an occupancy-like skill) is not absorbed
+into the quality score, mirroring the count-conditioning decision.
+Board rebuilt on arsenal-B: regression 0.50/SD holding RA9
+[CI 0.31,0.70], 0.43 holding full line [0.22,0.67]; matched pairs
+(n=75) 8.22->6.09 vs 8.35->7.01 (0.92-run gap, 59 vs 53 improved);
+survivorship now equal (33% vs 34% return) so attrition does not
+explain the gap. Script: stuffplus_replication/arsenal_weighting_test.py.

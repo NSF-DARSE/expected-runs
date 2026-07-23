@@ -298,3 +298,15 @@ REFUTED (withdraw):
 Replication artifacts: `--years`/`--level` parameterization in
 `fair_criterion.py`; per-script logs and the full metric-by-metric comparison
 (replication_comparison.md) in the analysis workdir (Level II, not committed).
+
+Post-replication addendum (2026-07-23): collaborator review asked whether the
+location-scatter penalty weakens for elite arms (batters timing predictable
+locations). Tested on both D1 panels: the sd_z x stuff-quality interaction is
+null in both pairs (t=+0.39 and t=-0.52, opposite signs), and the elite
+tercile's scatter-criterion correlation (~+0.20) matches the full panel.
+Within college, location consistency is good at every stuff tier; any
+predictability cost starts above the college ceiling. MLB context for the
+reliability gap (FanGraphs primer): MLB year-over-year reliability is ~0.73
+Stuff+ / ~0.48 Location+ -- college Location+ reliability (0.479) matches MLB
+almost exactly; what inverts at college is location's VALIDITY, not its
+repeatability.

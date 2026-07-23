@@ -434,3 +434,15 @@ Board rebuilt on arsenal-B: regression 0.50/SD holding RA9
 (n=75) 8.22->6.09 vs 8.35->7.01 (0.92-run gap, 59 vs 53 improved);
 survivorship now equal (33% vs 34% return) so attrition does not
 explain the gap. Script: stuffplus_replication/arsenal_weighting_test.py.
+
+Blend weight check (2026-07-23): should the arsenal grade weight Stuff
+and Location equally? Sweep of w*z(stuff)+(1-w)*z(loc) on both D1
+pairs: flat plateau across w=0.4-0.75 (2526 effects 0.43/0.44/0.44/
+0.42; 2425 0.28-0.34), equal weight on the plateau both times. The
+2425-fitted tilt (0.80 stuff) applied out-of-sample to 2526 gives
++0.42 vs equal's +0.44 - fitted weights don't transfer, and the
+components' relative importance is itself unstable (joint coefs
+stuff/loc +0.33/+0.09 in 2425, +0.36/+0.25 in 2526) while being
+uncorrelated (r~0.01). KEEP EQUAL WEIGHTS - consistent with the
+script-05 finding that equal-z beat reliability-weighted blends.
+Script: component_model/portal/blend_weight_test.py.

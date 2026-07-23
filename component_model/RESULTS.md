@@ -283,11 +283,12 @@ ATTENUATED (real, not composition -- persists under D1-only):
   +0.34) says the old n=33 panel was noise, as flagged.
 
 REFUTED (withdraw):
-- The deployment/revealed-trust composite. Its 2024->2025 numbers (slider
-  validity 0.300, increment over results+Stuff+ +0.121 P=1.000) collapse in
-  2025->2026 to validity 0.006/0.027 (slider/changeup, D1) with the
-  increment flipping negative (slider -0.053, changeup -0.014, curveball
-  -0.131 with CI excluding zero). Individual trait signs (usage, sep_x) are
+- The deployment/revealed-trust composite. Its 2024->2025 D1 numbers (slider
+  validity 0.299, increment over results+Stuff+ +0.116, CI [+0.044,+0.188],
+  P=0.999; all-levels: 0.300, +0.121, P=1.000) collapse in 2025->2026 to
+  validity 0.006/0.027 (slider/changeup, D1) with the increment flipping
+  negative (slider -0.053, changeup -0.014, curveball -0.131 with CI
+  excluding zero). Individual trait signs (usage, sep_x) are
   unstable across pitch types. The composite is still reliable (~0.6) -- a
   stable pitcher attribute -- but it does not predict future run value. The
   DISCOVERED-NOT-CONFIRMED label and the do-not-ship gate did their job;

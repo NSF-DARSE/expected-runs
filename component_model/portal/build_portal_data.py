@@ -247,9 +247,11 @@ def pdetail(pid):
             drivers.append(dict(f=lab, raw=round(raw, nd), unit=unit,
                 pctl=int(round(100*(st['ref_fm'][ftr] < raw).mean())),
                 pts=round(-15*c[ftr]/st['sd_q'], 1)))
-        entries.append(dict(pt=_name, n=int(r.n),
-            stuff=round(100 - 15*r.q_stuff/st['sd_q'], 1),
-            loc=round(100 - 15*r.q_loc/st['sd_l'], 1), drivers=drivers))
+        stuff100 = round(100 - 15*r.q_stuff/st['sd_q'], 1)
+        # residual so displayed rows reconcile: drivers + rest = stuff - 100
+        rest = round(round(stuff100 - 100, 1) - sum(d['pts'] for d in drivers), 1)
+        entries.append(dict(pt=_name, n=int(r.n), stuff=stuff100,
+            loc=round(100 - 15*r.q_loc/st['sd_l'], 1), drivers=drivers, rest=rest))
     entries.sort(key=lambda e: -e['n'])
     tot = sum(e['n'] for e in entries)
     for e in entries:

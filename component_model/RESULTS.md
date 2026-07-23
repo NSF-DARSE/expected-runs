@@ -365,3 +365,18 @@ them attributes noise. The mixed reliability of these ingredients is
 consistent with Location+'s overall 0.48 -- the measurement-improvement
 lever is to weight the stable+valid features (waste, mean_z) and downweight
 the unstable ones.
+
+Portal buy-low backtest (2026-07-23): does bad-results + good-model-grade
+identify pitchers who outperform their line the next year? Within each D1
+pair, take the worst tercile on year-1 surface results (mean Target) and
+split by year-1 model grade (mean ridge_pred). Next-year mean Target:
+  2024->2025: BUY (good model) -0.0074 vs AVOID (bad model) +0.0043
+  2025->2026: BUY -0.0040 vs AVOID +0.0037
+The BUY group crosses to better-than-average despite a bottom-tercile prior
+line; the gap (~0.008-0.012 runs/pitch) is roughly a win over a full season
+of fastballs. Symmetric sell-high check: best-results + bad-model pitchers
+regress hard in pair 1 (-0.030 -> -0.001 vs -0.018 for the real group);
+attenuated but same direction in pair 2. Caveats: same-school population
+(portal transfers change park/defense/level context), FF-only panel, and
+portal candidates often have thinner samples than the >=100-pitch floor
+used here.

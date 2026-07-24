@@ -13,7 +13,14 @@ $delay = 5
 for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
   if ((Get-Date) -gt $deadline) { Write-Error "Refresh exceeded ${TimeoutMinutes}m timeout"; exit 1 }
   try {
-    python -m webapp_publisher.publish --season $Season --data-through $DataThrough
+    $remainingSec = [int]([Math]::Floor(($deadline - (Get-Date)).TotalSeconds))
+    if ($remainingSec -le 0) { Write-Error "Refresh exceeded ${TimeoutMinutes}m timeout"; exit 1 }
+    $proc = Start-Process -FilePath "python" -ArgumentList @("-m","webapp_publisher.publish","--season",$Season,"--data-through",$DataThrough) -NoNewWindow -PassThru
+    if (-not $proc.WaitForExit($remainingSec * 1000)) {
+      try { $proc.Kill() } catch {}
+      throw "publish timed out after ${remainingSec}s (attempt $attempt)"
+    }
+    if ($proc.ExitCode -ne 0) { throw "publish exited with code $($proc.ExitCode) (attempt $attempt)" }
     Write-Host "Refresh succeeded on attempt $attempt"; exit 0
   } catch {
     Write-Warning "Attempt $attempt failed: $_"

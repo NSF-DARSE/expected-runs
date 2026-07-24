@@ -5,7 +5,7 @@ never restructured, then transforms + uploads. Fails loudly on any step.
 """
 import argparse, json, os, pathlib, subprocess, sys
 from datetime import datetime, timezone
-from webapp_publisher.build_bundle import build_bundle
+from webapp_publisher.build_bundle import build_bundle, to_native
 from webapp_publisher.schema import validate_bundle
 from webapp_publisher.upload import upload_bundle
 
@@ -45,7 +45,7 @@ def main() -> int:
         out = pathlib.Path(args.workdir) / "bundle"
         out.mkdir(parents=True, exist_ok=True)
         for name, payload in bundle.items():
-            (out / name).write_text(json.dumps(payload, indent=2, allow_nan=False))
+            (out / name).write_text(json.dumps(to_native(payload), indent=2, allow_nan=False))
         print(f"[dry-run] wrote {len(bundle)} files to {out}")
         return 0
 

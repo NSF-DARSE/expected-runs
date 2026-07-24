@@ -1,9 +1,9 @@
 { "population": 543, "team": "DEL_BLU",
   "staff": [
-    { "name": "Moyzan, Ben", "hand": "R", "ff": 210, "adjres": 112.0, "stuff": 120.0, "loc": 128.0, "pitch": 134.0,
+    { "name": "Test-Pitcher, Alpha", "hand": "R", "ff": 210, "adjres": 112.0, "stuff": 120.0, "loc": 128.0, "pitch": 134.0,
       "whiff": 0.23, "zone": 0.52, "heart": 0.24, "mean_height": 3.1, "loc_flag": "",
       "stuff_attr": [["effectivevelo", 34.0], ["inducedvertbreak", 10.0], ["horzbreak", 6.0], ["relheight", -1.0], ["relside", -3.0]] },
-    { "name": "Marose, Alex", "hand": "L", "ff": 39, "adjres": 101.0, "stuff": 108.0, "loc": 99.0, "pitch": 104.0,
+    { "name": "Test-Pitcher, Bravo", "hand": "L", "ff": 39, "adjres": 101.0, "stuff": 108.0, "loc": 99.0, "pitch": 104.0,
       "whiff": 0.31, "zone": 0.49, "heart": 0.22, "mean_height": 3.0, "loc_flag": "small sample",
       "stuff_attr": [["effectivevelo", 12.0], ["horzbreak", 5.0], ["inducedvertbreak", 3.0], ["relheight", -2.0], ["relside", -4.0]] }
   ],

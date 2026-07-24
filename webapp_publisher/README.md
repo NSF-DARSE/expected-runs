@@ -28,10 +28,30 @@ notebook by hand.
 
 ## Running it
 
+### Season and data-through labels
+
+`season` and `dataThrough` in the published manifest are derived, not
+free-typed, so the board's labels always match what the scorer actually
+graded:
+
+- **season** = the later year in `STUFFPLUS_YEARS` (default `2024,2025`,
+  so season defaults to `2025`). `08_staff_scores.py`'s population is
+  always the later year of that train/eval pair, relabeled internally to
+  the "2025" role regardless of the literal year — see
+  `component_model/analysis/fair_criterion.py`. Until 2026 is validated,
+  keep `STUFFPLUS_YEARS=2024,2025` in `.env` so the board represents 2025.
+- **dataThrough** = the latest game date present in `--data` whose year
+  matches `season` (read from the `Date` column only). If the column is
+  missing or no rows fall in that season, `publish.py` fails loudly rather
+  than silently stamping today's date.
+
+Both can still be overridden explicitly with `--season` / `--data-through`
+for backfills or one-off runs.
+
 ### Dry run (no Azure credentials needed)
 
 ```
-python -m webapp_publisher.publish --data <csv> --workdir <dir> --team DEL_BLU --season 2026 --data-through 2026-07-24 --dry-run
+python -m webapp_publisher.publish --data <csv> --workdir <dir> --team DEL_BLU --dry-run
 ```
 
 Writes `manifest.json` and `staff_board.json` under `<workdir>/bundle/`
@@ -46,15 +66,20 @@ Requires `WEBAPP_STORAGE_CONNECTION_STRING` (and optionally
 explicitly):
 
 ```
-python -m webapp_publisher.publish --season 2026 --data-through 2026-07-24
+python -m webapp_publisher.publish
 ```
 
 ### Env file
 
-Copy `.env.example` to `.env` and fill in the real connection string. `.env`
-is git-ignored and blocked from being staged by a repo deny rule — **Jack
-stages/creates `.env` himself**; this repo only ever tracks `.env.example`
-with placeholders.
+Copy `.env.example` to `webapp_publisher/.env` and fill in the real
+connection string (and `STUFFPLUS_YEARS`, `STUFFPLUS_DATA`,
+`STUFFPLUS_WORKDIR`, etc). `publish.py` auto-loads `webapp_publisher/.env`
+at startup via `python-dotenv` (best-effort: if `python-dotenv` isn't
+installed, or the file doesn't exist, it degrades gracefully and falls
+back to whatever is already in the process environment — e.g. from the
+scheduler). `.env` is git-ignored and blocked from being staged by a repo
+deny rule — **Jack stages/creates `.env` himself**; this repo only ever
+tracks `.env.example` with placeholders.
 
 ### Scheduled task
 
@@ -62,7 +87,12 @@ with placeholders.
 exponential backoff (5s, 10s, 20s, ...), and an overall timeout (default 30
 minutes) so a transient failure doesn't retry forever and a hung run doesn't
 block the next day's schedule. It fails loudly (non-zero exit, `Write-Error`)
-if all retries are exhausted or the timeout is exceeded.
+if all retries are exhausted or the timeout is exceeded. It does NOT pass
+`--season`/`--data-through` — `publish.py` derives both (see above); set
+`STUFFPLUS_YEARS` in `webapp_publisher/.env` to control the season. Each
+attempt's stdout/stderr is redirected to
+`webapp_publisher/logs/refresh-<date>-attempt<N>.log` / `.err.log` so an
+unattended scheduled run (including any failed retries) leaves a trace.
 
 Register it once (run by Jack, not part of this repo's test suite):
 

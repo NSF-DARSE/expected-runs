@@ -97,8 +97,24 @@ for _name, _tag in _TYPES:
     _sc = _model.named_steps['standardscaler']; _rd = _model.named_steps['ridge']
     _contrib = (_fm - _sc.mean_) / _sc.scale_ * _rd.coef_  # runs, lower = better
     _ref = _g[_g.n >= 50]  # display-scale reference population for this type
+    # location decomposition by zone band (script-02 band definitions):
+    # q_loc = sum_b (share_b*mean_b - Share_b*Mean_b), exact by construction
+    _ax = _p1['PlateLocSide'].abs(); _zz = _p1['PlateLocHeight']
+    _heart = (_ax <= 0.558) & _zz.between(1.83, 3.17)
+    _shadow = (_ax <= 1.108) & _zz.between(1.17, 3.83) & ~_heart
+    _chase = (_ax <= 1.658) & _zz.between(0.5, 4.5) & ~_heart & ~_shadow
+    _tmp = _p1.assign(band=np.select([_heart, _shadow, _chase],
+                                     ['Heart','Shadow','Chase'], 'Waste'))
+    _bs = _tmp.groupby(['PitcherId','band'])['loc'].agg(['size','mean'])
+    _np_ = _tmp.groupby('PitcherId').size()
+    _share = _bs['size'].unstack(fill_value=0).div(_np_, axis=0)
+    _bmean = _bs['mean'].unstack()
+    _Share = _tmp['band'].value_counts(normalize=True)
+    _Mean = _tmp.groupby('band')['loc'].mean()
+    _lc = (_share * _bmean.fillna(0)).sub(_Share * _Mean, axis=1)
     _store[_name] = dict(g=_g, fm=_fm, contrib=_contrib,
         ref_fm=_fm.loc[_ref.index],
+        share=_share, lc=_lc, ref_share=_share.loc[_ref.index],
         sd_q=_ref.q_stuff.std(), sd_l=_ref.q_loc.std())
 _pt = pd.concat(_parts)
 _grp = _pt.groupby('PitcherId')
@@ -250,8 +266,18 @@ def pdetail(pid):
         stuff100 = round(100 - 15*r.q_stuff/st['sd_q'], 1)
         # residual so displayed rows reconcile: drivers + rest = stuff - 100
         rest = round(round(stuff100 - 100, 1) - sum(d['pts'] for d in drivers), 1)
-        entries.append(dict(pt=_name, n=int(r.n), stuff=stuff100,
-            loc=round(100 - 15*r.q_loc/st['sd_l'], 1), drivers=drivers, rest=rest))
+        loc100 = round(100 - 15*r.q_loc/st['sd_l'], 1)
+        # location rows: one per zone band, exact decomposition of loc - 100
+        ldrv = []
+        for b in ['Heart','Shadow','Chase','Waste']:
+            sh = float(st['share'].loc[pid, b]) if b in st['share'].columns else 0.0
+            cb = float(st['lc'].loc[pid, b]) if b in st['lc'].columns else 0.0
+            ldrv.append(dict(f=b, raw=int(round(100*sh)), unit='%',
+                pctl=int(round(100*(st['ref_share'][b] < sh).mean())),
+                pts=round(-15*cb/st['sd_l'], 1)))
+        loc_rest = round(round(loc100 - 100, 1) - sum(d['pts'] for d in ldrv), 1)
+        entries.append(dict(pt=_name, n=int(r.n), stuff=stuff100, loc=loc100,
+            drivers=drivers, rest=rest, loc_drivers=ldrv, loc_rest=loc_rest))
     entries.sort(key=lambda e: -e['n'])
     tot = sum(e['n'] for e in entries)
     for e in entries:

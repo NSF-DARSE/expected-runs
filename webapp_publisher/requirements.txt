@@ -1,0 +1,2 @@
+azure-storage-blob>=12.24
+pytest>=8

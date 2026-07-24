@@ -1,5 +1,5 @@
 import json, pathlib
-from webapp_publisher.build_bundle import build_bundle
+from webapp_publisher.build_bundle import build_bundle, to_native
 
 FIX = pathlib.Path(__file__).parent / "fixtures" / "staff_scores.json"
 
@@ -30,7 +30,7 @@ def test_ids_are_stable_across_calls():
     assert ids1 == ids2
 
 from webapp_publisher.schema import validate_bundle
-import pytest, json, pathlib
+import pytest
 
 def test_validate_bundle_rejects_bad_flag():
     staff_scores = json.loads((pathlib.Path(__file__).parent/"fixtures"/"staff_scores.json").read_text())
@@ -38,3 +38,36 @@ def test_validate_bundle_rejects_bad_flag():
     bundle["staff_board.json"]["pitchers"][0]["locFlag"] = "nope"
     with pytest.raises(ValueError):
         validate_bundle(bundle)
+
+def test_validate_bundle_rejects_missing_manifest_key():
+    staff_scores = json.loads((pathlib.Path(__file__).parent/"fixtures"/"staff_scores.json").read_text())
+    bundle = build_bundle(staff_scores, season=2026, data_through="2026-03-15", built_iso="x")
+    del bundle["manifest.json"]["season"]
+    with pytest.raises(ValueError):
+        validate_bundle(bundle)
+
+def test_validate_bundle_rejects_empty_pitchers():
+    staff_scores = json.loads((pathlib.Path(__file__).parent/"fixtures"/"staff_scores.json").read_text())
+    bundle = build_bundle(staff_scores, season=2026, data_through="2026-03-15", built_iso="x")
+    bundle["staff_board.json"]["pitchers"] = []
+    with pytest.raises(ValueError):
+        validate_bundle(bundle)
+
+
+def test_to_native_handles_numpy_scalars_and_arrays():
+    np = pytest.importorskip("numpy")
+
+    i = to_native(np.int64(5))
+    assert i == 5 and isinstance(i, int)
+
+    f = to_native(np.float64(1.5))
+    assert f == 1.5 and isinstance(f, float)
+
+    assert to_native(np.float64("nan")) is None
+    assert to_native(np.float64("inf")) is None
+
+    arr = to_native(np.array([1, 2]))
+    assert arr == [1, 2] and isinstance(arr, list)
+
+    nested = to_native({"a": np.int64(3), "b": [np.float64("nan")]})
+    assert nested == {"a": 3, "b": [None]}

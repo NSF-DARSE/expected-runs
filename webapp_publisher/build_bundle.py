@@ -49,7 +49,7 @@ def _row(s: dict, pid: int) -> dict:
         "loc": s["loc"],
         "adjres": s["adjres"],
         "pitch": s["pitch"],
-        "whiff": s.get("whiff"),
+        "whiff": s["whiff"],
         "zone": s["zone"],
         "heart": s["heart"],
         "meanHeight": s["mean_height"],

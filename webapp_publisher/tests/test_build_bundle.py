@@ -16,10 +16,15 @@ def test_build_bundle_shapes_manifest_and_board():
     assert board["population"] == 543
     row = board["pitchers"][0]
     assert set(row) == {"id","name","hand","ff","stuff","loc","adjres","pitch",
-                        "whiff","zone","heart","meanHeight","locFlag","stuffAttr"}
+                        "whiff","zone","heart","meanHeight","locFlag","stuffAttr",
+                        "stuffNoHand","pitchNoHand","stuffAttrNoHand"}
     assert isinstance(row["id"], int)
     assert row["locFlag"] in ("", "caution", "small sample")
     assert isinstance(row["stuffAttr"], list) and isinstance(row["stuffAttr"][0], list)
+    assert isinstance(row["stuffNoHand"], (int, float))
+    assert isinstance(row["pitchNoHand"], (int, float))
+    assert isinstance(row["stuffAttrNoHand"], list) and isinstance(row["stuffAttrNoHand"][0], list)
+    assert len(row["stuffAttrNoHand"][0]) == 2
 
 def test_ids_are_stable_across_calls():
     staff_scores = json.loads(FIX.read_text())

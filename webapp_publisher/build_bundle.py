@@ -49,12 +49,15 @@ def _row(s: dict, pid: int) -> dict:
         "loc": s["loc"],
         "adjres": s["adjres"],
         "pitch": s["pitch"],
+        "stuffNoHand": s["stuff_nohand"],
+        "pitchNoHand": s["pitch_nohand"],
         "whiff": s["whiff"],
         "zone": s["zone"],
         "heart": s["heart"],
         "meanHeight": s["mean_height"],
         "locFlag": s["loc_flag"],
         "stuffAttr": [[f, v] for f, v in s["stuff_attr"]],
+        "stuffAttrNoHand": [[f, v] for f, v in s["stuff_attr_nohand"]],
     })
 
 

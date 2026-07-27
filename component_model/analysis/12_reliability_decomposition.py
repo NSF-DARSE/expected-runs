@@ -177,7 +177,234 @@ def part_a(ff, args):
     return out
 
 
+def residualize(tab, cols):
+    """Season-center the criterion, then project out physical predictors.
+
+    Returns (residual table shaped for vc.variance_components, coefficients).
+    Predictors are z-scored so coefficients are comparable and sign-readable.
+
+    ORIENTATION GATE: stuff/loc are expected runs (lower = better) and so is the
+    criterion, so a correctly oriented predictor gets a POSITIVE coefficient. An
+    inverted trait narrative shipped once in this project before review caught
+    it; the caller prints these signs.
+    """
+    t = tab.copy()
+    t["c"] = t["mean"] - t.groupby("season")["mean"].transform("mean")
+    X = np.column_stack([fc.z(t[c]).values for c in cols] + [np.ones(len(t))])
+    beta, *_ = np.linalg.lstsq(X, t["c"].values, rcond=None)
+    t["resid"] = t["c"].values - X @ beta
+    out = t[["pitcher", "season", "n"]].copy()
+    out["mean"] = t["resid"].values
+    return out, dict(zip(cols, beta[:len(cols)]))
+
+
+def noise_scales(ff, value_col, args):
+    """Naive vs game-clustered noise scale for a pitcher-season mean.
+
+    The naive pitch-level variance assumes independent pitches. Pitches in one
+    game share batter, park, umpire, and day effects, so it understates the
+    uncertainty in a season mean; the half-split scale measures that directly.
+    Using the naive scale here left Part B disagreeing with Part A by 0.06
+    reliability, in exactly this direction.
+    """
+    key = ff["PitcherId"].astype(str) + "|" + ff["year"].astype(str)
+    naive = vc.pooled_within_variance(ff[value_col], key)
+    tmp = ff[[value_col, "half"]].copy()
+    tmp["ps"] = key
+    eff, n_ps = vc.effective_noise_scale(tmp, value_col, "ps",
+                                        min_half=args.min_half)
+    print(f"\nNOISE SCALE for {value_col} (var of a season mean ~= scale / n):")
+    print(f"  naive, pitches independent   {naive:.5f}   (sd {np.sqrt(naive):.3f})")
+    print(f"  game-clustered half-split    {eff:.5f}   "
+          f"(from {n_ps} pitcher-seasons)")
+    print(f"  design effect                {eff / naive:.2f}x   "
+          f"<- how much within-game shared variance inflates the real error")
+    print("  The clustered scale is used below; the naive one would understate")
+    print("  noise and hand the difference to skill.")
+    return naive, eff
+
+
+def part_b(ff, tab, sigma2_w, args):
+    """Three-bucket decomposition, then the same fit net of physical Pitching+."""
+    print("\n" + "=" * 78)
+    print("PART B -- VARIANCE DECOMPOSITION")
+    print("=" * 78)
+
+    base = vc.variance_components(tab, sigma2_w)
+    print(f"\nBUCKET SHARES of single-season observed variance in mean xT "
+          f"(n={base['n_pitchers']} pitchers, {base['n_pitcher_seasons']} pitcher-seasons):")
+    print(f"  bucket 1  measurement noise   {base['share_noise']:>7.1%}   "
+          f"(var {base['s2_noise']:.6f})")
+    print(f"  bucket 2  true drift          {base['share_drift']:>7.1%}   "
+          f"(var {base['s2_drift']:.6f})")
+    print(f"  stable skill                  {base['share_stable']:>7.1%}   "
+          f"(var {base['s2_stable']:.6f})")
+    if base["s2_drift"] < 0:
+        print("  NOTE: drift estimated slightly negative -- consistent with a true")
+        print("        value near zero. Reported raw, not clamped.")
+    print("\n  stable-skill covariance by season pair (lag diagnostic):")
+    for (s1, s2), (cov, n) in sorted(base["pairs"].items()):
+        lag = s2 - s1
+        print(f"    {s1}-{s2}  lag {lag}   cov={cov:.6f}   n={n}")
+    print("    If lag-2 covariance sits below lag-1, part of what looks stable")
+    print("    at one year of separation is slow drift, not permanent talent.")
+
+    print("\nMISSING SKILL -- stable variance surviving physical Pitching+:")
+    print("  Results-based predictors are deliberately EXCLUDED: explaining a")
+    print("  results-based criterion with a results-based predictor would be")
+    print("  circular. Physical traits only (Stuff+ ridge, pooled Location+).")
+    print(f"{'model':<28}{'stable var':>12}{'captured':>10}{'MISSING':>10}"
+          f"{'of total':>10}")
+    print(f"{'none (raw criterion)':<28}{base['s2_stable']:>12.6f}"
+          f"{0.0:>10.1%}{1.0:>10.1%}{base['share_stable']:>10.1%}")
+    variants = [("Stuff+ only", ["stuff"]),
+                ("Location+ only", ["loc"]),
+                ("Stuff+ and Location+", ["stuff", "loc"])]
+    results = {}
+    for label, cols in variants:
+        rtab, coefs = residualize(tab, cols)
+        out = vc.variance_components(rtab, sigma2_w)
+        captured = 1.0 - out["s2_stable"] / base["s2_stable"]
+        print(f"{label:<28}{out['s2_stable']:>12.6f}{captured:>10.1%}"
+              f"{1 - captured:>10.1%}{out['s2_stable'] / base['total']:>10.1%}")
+        results[label] = {"out": out, "captured": captured, "coefs": coefs}
+
+    print("\n  coefficient signs (POSITIVE = correctly oriented; both predictor")
+    print("  and criterion are expected runs, lower = better):")
+    for label, res in results.items():
+        sig = "  ".join(f"{k}={v:+.4f}" for k, v in res["coefs"].items())
+        bad = [k for k, v in res["coefs"].items() if v < 0]
+        flag = f"   <-- CHECK: {','.join(bad)} negative" if bad else ""
+        print(f"    {label:<26}{sig}{flag}")
+
+    full = results["Stuff+ and Location+"]
+    print(f"\n  HEADLINE: physical Pitching+ captures {full['captured']:.1%} of stable "
+          f"skill;\n            {1 - full['captured']:.1%} of stable skill is MISSING "
+          f"(= {full['out']['s2_stable'] / base['total']:.1%} of total\n            "
+          f"single-season variance in mean xT).")
+    return base, results
+
+
+def lag_means(pairs):
+    """Pitcher-count-weighted stable covariance at one and two years of lag.
+
+    A permanent trait contributes equally at every lag. If the lag-2 covariance
+    sits below lag-1, some of what the three-bucket model books as stable is
+    really slow decay, and 'stable' has to be read as 'persists to next season'
+    rather than 'permanent'.
+    """
+    num = {1: 0.0, 2: 0.0}
+    den = {1: 0.0, 2: 0.0}
+    for (s1, s2), (cov, n) in pairs.items():
+        lag = s2 - s1
+        if lag in num:
+            num[lag] += cov * n
+            den[lag] += n
+    return tuple(num[k] / den[k] if den[k] else float("nan") for k in (1, 2))
+
+
+def cluster_bootstrap(tab, sigma2_w, reps, seed=17):
+    """Resample PITCHERS with replacement; whole careers move together.
+
+    sigma2_w is held fixed: it is estimated from millions of pitches, so its
+    sampling error is negligible next to the between-pitcher terms.
+    """
+    rng = np.random.default_rng(seed)
+    pids = tab["pitcher"].unique()
+    base = tab.reset_index(drop=True)
+    rows_by_p = [base.index[base["pitcher"] == p].to_numpy() for p in pids]
+    keys = ["share_noise", "share_drift", "share_stable", "persistence"]
+    acc = {k: [] for k in keys}
+    acc["captured"] = []
+    lag1s, lag2s = [], []
+    for _ in range(reps):
+        draw = rng.integers(0, len(pids), len(pids))
+        take = np.concatenate([rows_by_p[k] for k in draw])
+        # Relabel so a pitcher drawn twice acts as two independent pitchers.
+        newpid = np.repeat(np.arange(len(draw)),
+                           [len(rows_by_p[k]) for k in draw])
+        bt = base.take(take).copy()
+        bt["pitcher"] = newpid
+        try:
+            b = vc.variance_components(bt, sigma2_w)
+            rtab, _ = residualize(bt, ["stuff", "loc"])
+            r = vc.variance_components(rtab, sigma2_w)
+        except (ValueError, np.linalg.LinAlgError):
+            continue
+        for k in keys:
+            acc[k].append(b[k])
+        acc["captured"].append(1.0 - r["s2_stable"] / b["s2_stable"])
+        l1, l2 = lag_means(b["pairs"])
+        if not (np.isnan(l1) or np.isnan(l2)) and l1 > 0:
+            lag1s.append(l1)
+            lag2s.append(l2)
+    print("\nCLUSTER BOOTSTRAP over pitchers "
+          f"({len(acc['share_stable'])} usable of {reps} reps):")
+    for k in keys + ["captured"]:
+        fc.boot_report(k, acc[k])
+
+    if lag1s:
+        l1 = np.array(lag1s)
+        l2 = np.array(lag2s)
+        ratio = l2 / l1
+        print("\n  IS 'STABLE' PERMANENT OR SLOWLY DECAYING? A permanent trait")
+        print("  contributes the same covariance at every lag.")
+        print(f"    lag-1 covariance  {l1.mean():.6f}  95% CI="
+              f"[{np.percentile(l1, 2.5):.6f},{np.percentile(l1, 97.5):.6f}]")
+        print(f"    lag-2 covariance  {l2.mean():.6f}  95% CI="
+              f"[{np.percentile(l2, 2.5):.6f},{np.percentile(l2, 97.5):.6f}]")
+        print(f"    retention lag2/lag1 = {np.median(ratio):.2f}  95% CI="
+              f"[{np.percentile(ratio, 2.5):.2f},{np.percentile(ratio, 97.5):.2f}]"
+              f"   P(lag2 < lag1) = {(ratio < 1).mean():.3f}")
+    return acc
+
+
+def consistency(a_out, base):
+    """Do Part A and Part B agree? They measure overlapping quantities."""
+    print("\n" + "=" * 78)
+    print("A vs B CONSISTENCY CHECK")
+    print("=" * 78)
+    obs = [v["rho_full"] for v in a_out.values()]
+    rho_obs = float(np.mean(obs)) if obs else float("nan")
+    print(f"{'quantity':<44}{'observed':>10}{'B predicts':>12}")
+    print(f"{'within-season reliability (A, mean of seasons)':<44}"
+          f"{rho_obs:>10.3f}{base['rho_within_pred']:>12.3f}")
+    print("  (A measures stable+drift over stable+drift+noise; B predicts the same)")
+    print(f"\n{'persistence = stable / (stable + drift)':<44}"
+          f"{'':>10}{base['persistence']:>12.3f}")
+    print("  Fraction of what repeats within a season that also survives to the")
+    print("  next one. This, not the model, is what caps year-over-year forecasting.")
+    gap = abs(rho_obs - base["rho_within_pred"])
+    verdict = "AGREE" if gap < 0.05 else "DISAGREE -- reconcile before reporting"
+    print(f"\n  gap = {gap:.3f}  ->  {verdict}")
+
+
 if __name__ == "__main__":
     args = cli()
     ff, tab = build_panel(args)
     a_out = part_a(ff, args)
+    naive_w, sigma2_w = noise_scales(ff, "xT", args)
+    base, results = part_b(ff, tab, sigma2_w, args)
+    cluster_bootstrap(tab, sigma2_w, args.boot)
+    consistency(a_out, base)
+
+    print("\n  Same decomposition on the naive pitch-independent scale, for")
+    print("  reference only -- it is the version that disagrees with Part A:")
+    nb = vc.variance_components(tab, naive_w)
+    print(f"    noise {nb['share_noise']:.1%}  drift {nb['share_drift']:.1%}  "
+          f"stable {nb['share_stable']:.1%}  "
+          f"implied within-season rel {nb['rho_within_pred']:.3f}")
+
+    print("\n" + "=" * 78)
+    print("ROBUSTNESS: same decomposition on adjT (opponent-adjusted criterion)")
+    print("=" * 78)
+    alt = tab.drop(columns=["mean"]).rename(columns={"mean_adjT": "mean"})
+    _, s2w_alt = noise_scales(ff, "adjT", args)
+    b_alt = vc.variance_components(alt, s2w_alt)
+    r_alt, _ = residualize(alt, ["stuff", "loc"])
+    o_alt = vc.variance_components(r_alt, s2w_alt)
+    print(f"  noise {b_alt['share_noise']:.1%}  drift {b_alt['share_drift']:.1%}  "
+          f"stable {b_alt['share_stable']:.1%}  "
+          f"captured {1 - o_alt['s2_stable'] / b_alt['s2_stable']:.1%}")
+    print("  xT and adjT correlate ~0.985, so these should track the headline")
+    print("  closely; a large divergence means something is wrong.")

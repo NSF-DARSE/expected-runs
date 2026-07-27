@@ -50,6 +50,41 @@ def spearman_brown(r):
     return 2.0 * r / (1.0 + r) if (1.0 + r) != 0 else float("nan")
 
 
+def effective_noise_scale(df, value_col, group_col, half_col="half", min_half=25):
+    """Sampling-noise scale for a group mean, estimated from independent halves.
+
+    Returns (sigma2_eff, n_groups) where var(group mean) ~= sigma2_eff / n.
+
+    Why not just use pooled_within_variance: that treats pitches as independent.
+    They are not. Pitches in one game share batter, park, umpire, and day
+    effects, so the real uncertainty in a season mean exceeds sigma2_w / n. Here
+    the two halves share no games, so their difference carries the clustering
+    too, and nothing has to be assumed about it. sigma2_eff / sigma2_w is the
+    design effect: the factor by which a pitch-level variance understates the
+    uncertainty in a season mean.
+
+    Algebra: halves of equal size with independent noise give var(mA - mB) = 2v,
+    where v is each half-mean's noise variance; the full mean averages the two
+    halves, so its noise variance is v/2 = var(mA - mB) / 4. Multiplying by n
+    expresses that as a per-pitch scale comparable to a pitch-level variance.
+
+    Requires a half assignment that splits by CLUSTER (whole games), not by
+    pitch; a pitch-level split leaves the shared variance in both halves and
+    returns the naive scale.
+    """
+    g = df.groupby([group_col, half_col])[value_col].agg(["mean", "size"]).unstack(half_col)
+    g = g.dropna()
+    if g.empty:
+        return float("nan"), 0
+    g.columns = ["mA", "mB", "nA", "nB"]
+    g = g[(g["nA"] >= min_half) & (g["nB"] >= min_half)]
+    if g.empty:
+        return float("nan"), 0
+    n = g["nA"] + g["nB"]
+    est = n * (g["mA"] - g["mB"]) ** 2 / 4.0
+    return float(est.mean()), int(len(g))
+
+
 def variance_components(tab, sigma2_w, value_col="mean"):
     """Split pitcher-season variance into stable / drift / noise.
 

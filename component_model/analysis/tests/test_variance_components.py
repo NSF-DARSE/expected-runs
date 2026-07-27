@@ -104,6 +104,50 @@ def test_two_season_panel_still_identified():
     assert out["s2_stable"] == pytest.approx(truth["s2_stable"], rel=0.20)
 
 
+def simulate_clustered_pitches(n_groups=1500, games=12, ppg=20, tau2=0.02,
+                               sigma2_e=0.09, seed=5):
+    """Pitch-level data with a game effect, split into halves by whole game.
+
+    var(group mean) = tau2 / games + sigma2_e / n, so expressed as a per-pitch
+    scale, sigma2_eff = tau2 * ppg + sigma2_e. That is the prediction the
+    estimator has to reproduce.
+    """
+    rng = np.random.default_rng(seed)
+    rows = []
+    for gid in range(n_groups):
+        level = rng.normal(0, 0.03)
+        for gm in range(games):
+            game_eff = rng.normal(0, np.sqrt(tau2))
+            vals = rng.normal(level + game_eff, np.sqrt(sigma2_e), ppg)
+            rows.append(pd.DataFrame({"v": vals, "ps": gid, "half": gm % 2}))
+    return pd.concat(rows, ignore_index=True)
+
+
+def test_effective_noise_scale_includes_cluster_variance():
+    """The half-split scale must capture the game effect, not just pitch scatter."""
+    tau2, sigma2_e, ppg = 0.02, 0.09, 20
+    df = simulate_clustered_pitches(tau2=tau2, sigma2_e=sigma2_e, ppg=ppg)
+    got, n = vc.effective_noise_scale(df, "v", "ps", min_half=25)
+    assert n > 1000
+    assert got == pytest.approx(tau2 * ppg + sigma2_e, rel=0.10)
+
+
+def test_effective_noise_scale_exceeds_naive_when_clustered():
+    """Design effect > 1: pitch-level variance understates a season mean's error."""
+    df = simulate_clustered_pitches(tau2=0.02, sigma2_e=0.09)
+    eff, _ = vc.effective_noise_scale(df, "v", "ps", min_half=25)
+    naive = vc.pooled_within_variance(df["v"], df["ps"])
+    assert eff > 1.5 * naive
+
+
+def test_effective_noise_scale_matches_naive_without_clustering():
+    """With no game effect the two scales agree, so the correction is inert."""
+    df = simulate_clustered_pitches(tau2=0.0, sigma2_e=0.09, seed=21)
+    eff, _ = vc.effective_noise_scale(df, "v", "ps", min_half=25)
+    naive = vc.pooled_within_variance(df["v"], df["ps"])
+    assert eff == pytest.approx(naive, rel=0.10)
+
+
 def test_spearman_brown_doubles_length():
     assert vc.spearman_brown(0.5) == pytest.approx(2 / 3)
     assert vc.spearman_brown(0.0) == pytest.approx(0.0)

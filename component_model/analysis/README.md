@@ -34,6 +34,7 @@ Requires: pandas, pyarrow, numpy, scipy, scikit-learn.
 | `09_secondary_pitches.py` | Does the stack transfer to sliders/changeups/curves? | 01 pass |
 | `10_secondary_usage.py` | What predicts secondary-pitch outcomes beyond stuff? (exploratory) | 01 pass |
 | `11_expected_usage.py` | Arsenal-relative expected usage + trust residual (Usage Gap Board data, `--team`) | 01 pass |
+| `12_reliability_decomposition.py` | How much year-over-year unpredictability is noise vs skill Pitching+ misses? | pitch caches (`--caches`) |
 
 **Run 01 first, every time the source data changes.** If its prints do not match
 the anchor table in RESULTS.md, stop and reconcile before trusting anything else.
@@ -45,4 +46,12 @@ the anchor table in RESULTS.md, stop and reconcile before trusting anything else
   them invalidates every comparison; do it deliberately and re-anchor everything.
 - Scope: four-seam fastballs, 2024→2025, n=699 qualified pitchers. Conclusions are
   provisional pending 2026 replication.
+- `variance_components.py` is unit-tested: `cd component_model/analysis && python -m pytest tests/ -v`.
+  Run the tests after touching the estimator; the synthetic-recovery tests are the
+  only check that the decomposition is arithmetically correct, since nothing in the
+  real data reveals the true variance components.
+- Script 12 reads pitch-cache parquets (`--caches`) rather than the source CSV, and
+  spans three seasons. Regenerate the caches by running script 01 once per year pair
+  with `--level D1` if they are absent. Years are re-derived from `Date`, so caches
+  holding role-relabeled years are safe to pass.
 - Evaluation protocol and score-design principles: `../FRAMEWORK.md`.

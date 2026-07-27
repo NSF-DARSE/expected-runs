@@ -468,3 +468,99 @@ Stuff+/Location+ and top-3 exact ridge feature contributions,
 context features excluded from display) for the board's "why we like
 him" tooltip. Scripts: component_model/portal/extended_types_test.py,
 build_portal_data.py (v3).
+
+## Noise vs missing skill (script 12, 2026-07-27)
+
+How much of our year-over-year unpredictability is irreducible and how
+much is skill Pitching+ fails to encode? Three buckets, only the third
+of which is a model problem: measurement noise (a college season is too
+few pitches), true drift (pitchers really change), and missing skill
+(persistent, year-1-visible talent the physical scores do not carry).
+
+Panel: 1,377 D1 pitchers, 2,945 pitcher-seasons, 2024-2026, four-seam,
+100+ FF per season and 2+ qualified seasons, median 221 FF. Criterion
+xT, fit once on all three seasons pooled so a given EV/LA outcome maps
+to the same run value in every year. Built from the existing D1 pitch
+caches; note the 2025-2026 cache stores role-relabeled years, so
+calendar years are re-derived from Date.
+
+WITHIN-SEASON RELIABILITY of mean xT, split by whole GAME and
+Spearman-Brown corrected to full length: 0.283 (2024), 0.362 (2025),
+0.295 (2026), mean 0.314. Stuff+ anchor 0.983-0.988 on the same split,
+confirming the split itself. This sits essentially on top of the
+across-season figure (C1/C2 reliability 0.27-0.30), which is the
+diagnostic: the criterion is noisy, not drifting.
+
+Game parity matters. Script 06 splits by PITCH parity, which leaves
+within-game shared variance (batter, park, umpire, day) in both halves
+and reads high; its n0 ~= 51 floor is optimistic for that reason. The
+same effect makes a pitch-level variance understate the error in a
+season mean by 1.11x here (design effect from the half-split), and on
+the naive scale Part B disagreed with Part A by 0.06 reliability, with
+the difference being credited to skill. The clustered scale is used
+throughout.
+
+BUCKET SHARES of single-season variance in mean xT (cluster bootstrap
+over pitchers, 1000 reps):
+
+| bucket | share | 95% CI |
+|---|---|---|
+| measurement noise | 69.7% | [66.0, 74.0] |
+| true drift | 6.0% | [0.4, 10.9] |
+| stable skill | 24.4% | [19.3, 29.3] |
+
+Persistence (stable / stable+drift) = 0.80, CI [0.65, 0.99]. Nearly
+everything that repeats within a season also survives to the next one.
+The ceiling on year-ahead forecasting is set by how little of a college
+season is signal, not by pitchers changing.
+
+MISSING SKILL, stable variance surviving the physical scores (results
+deliberately excluded: explaining a results-based criterion with a
+results-based predictor is circular):
+
+| predictors | captured share of stable skill |
+|---|---|
+| Stuff+ only | 12.2% |
+| Location+ only | 50.1% |
+| Stuff+ and Location+ | 57.5% |
+
+Physical Pitching+ captures 57.5% of stable skill (bootstrap 58.0%, CI
+[48.0, 68.9]); 42.5% is MISSING, which is 10.3% of total single-season
+variance. Coefficient signs both positive as required (stuff +0.0029,
+loc +0.0082 on z-scored predictors against a lower-is-better criterion).
+Cross-check: the decomposition implies a year-ahead validity of
+sqrt(0.575 x 0.244) = 0.375 for a predictor carrying exactly the captured
+part. Script 07 measures 0.345 for Location+ + Stuff+ with no access to
+the pitcher's own results, the directly comparable quantity. The two
+routes to the same ceiling agree, and the small gap sits in the expected
+direction given the lag decay below.
+
+"Stable" means persists to next season, not permanent. Covariance by
+lag: 0.000091 at one year, 0.000043 at two, retention 0.48 with CI
+[0.06, 0.95] and P(lag2 < lag1) = 0.981. About half the one-year signal
+is gone by two years, so the three-bucket model's permanent-plus-
+independent-shock structure is a simplification of something closer to
+a decaying component.
+
+VERDICT: measurement noise dominates at roughly 70%, and true drift is
+small (6%, CI barely excluding zero). Of the ~24% that is stable skill,
+the physical scores already carry well over half. The missing skill is
+real but bounded: ~10% of single-season variance, which caps what any
+better feature set can add. Two implications. Improving the features has
+much less headroom than the low pitch-level R2 suggests, and the larger
+lever is precision, since noise is a function of sample size and can be
+attacked with more pitches, multi-season pooling, or shrinkage rather
+than with new physics. Location+ carries 4x what Stuff+ does here, which
+is worth weighing against the fastball-only restriction in the
+production rule.
+
+Caveats: D1 only (the sole all-levels 2024 frame lacks a Level column;
+the feed's D2 share doubled, so all-levels would be composition-diluted
+anyway). Four-seam only. Three seasons, so drift and stable skill are
+separated but not precisely, and the lag-2 covariance rests on 285
+pitchers. The clustered noise scale is treated as known in the bootstrap.
+Same decomposition on adjT tracks closely (noise 68.2%, drift 5.5%,
+stable 26.3%, captured 64.1%). Part C, naming the missing channel, was
+scoped out pending this result.
+Script: component_model/analysis/12_reliability_decomposition.py
+(estimator + tests: variance_components.py, tests/).

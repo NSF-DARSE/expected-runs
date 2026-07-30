@@ -489,7 +489,13 @@ Spearman-Brown corrected to full length: 0.283 (2024), 0.362 (2025),
 0.295 (2026), mean 0.314. Stuff+ anchor 0.983-0.988 on the same split,
 confirming the split itself. This sits essentially on top of the
 across-season figure (C1/C2 reliability 0.27-0.30), which is the
-diagnostic: the criterion is noisy, not drifting.
+diagnostic: the criterion is noisy, not drifting. Note this 0.314 is
+(stable + drift) / total, i.e. "how much of a season repeats within
+itself" -- NOT the stable-skill-only share below (24.4%). Conflating
+the two is the mistake to avoid: asked live where the 24.4% figure came
+from, the instinctive answer is to point back at this number, and it's
+wrong -- 24.4% comes from the separate cross-season covariance measure
+further down.
 
 Game parity matters. Script 06 splits by PITCH parity, which leaves
 within-game shared variance (batter, park, umpire, day) in both halves
@@ -535,6 +541,15 @@ the pitcher's own results, the directly comparable quantity. The two
 routes to the same ceiling agree, and the small gap sits in the expected
 direction given the lag decay below.
 
+Absolute ceiling (100% of stable skill captured, zero missing): sqrt(0.244)
+= 0.494. Current Pitching+ (0.345) is 70% of that CORRELATION ceiling but
+only 49% of it in VARIANCE (R^2) terms (0.345^2 / 0.244) -- these two
+percentages differ because r compresses ratios via a square root relative
+to R^2. State one or the other explicitly; "about half" (the R^2 framing)
+and "most of the way there" (the r framing) are both defensible readings
+of the same number and will contradict each other if used loosely in the
+same conversation.
+
 "Stable" means persists to next season, not permanent. Covariance by
 lag: 0.000091 at one year, 0.000043 at two, retention 0.48 with CI
 [0.06, 0.95] and P(lag2 < lag1) = 0.981. About half the one-year signal
@@ -550,9 +565,18 @@ better feature set can add. Two implications. Improving the features has
 much less headroom than the low pitch-level R2 suggests, and the larger
 lever is precision, since noise is a function of sample size and can be
 attacked with more pitches, multi-season pooling, or shrinkage rather
-than with new physics. Location+ carries 4x what Stuff+ does here, which
-is worth weighing against the fastball-only restriction in the
-production rule.
+than with new physics. Location+ carries 4x what Stuff+ does here
+(captured share of stable skill: 50.1% vs 12.2%), which is worth
+weighing against the fastball-only restriction in the production rule.
+Metric note: that 4x is NOT the same comparison as script 07's raw
+next-year predictive correlation (Location+ 0.290 vs Stuff+ 0.235, only
+~1.2x) -- raw correlation is diluted by noise both scores are equally
+powerless against, which compresses the visible gap between a strong
+predictor and a weak one. Cite the captured-share ratio (4x) when
+talking about how much of true skill each score explains; cite the
+script-07 ratio (1.2x) when talking about how much better one score is
+as a practical forecasting tool. Don't use one number under the other's
+label.
 
 Caveats: D1 only (the sole all-levels 2024 frame lacks a Level column;
 the feed's D2 share doubled, so all-levels would be composition-diluted

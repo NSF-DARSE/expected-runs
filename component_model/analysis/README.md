@@ -35,6 +35,7 @@ Requires: pandas, pyarrow, numpy, scipy, scikit-learn.
 | `10_secondary_usage.py` | What predicts secondary-pitch outcomes beyond stuff? (exploratory) | 01 pass |
 | `11_expected_usage.py` | Arsenal-relative expected usage + trust residual (Usage Gap Board data, `--team`) | 01 pass |
 | `12_reliability_decomposition.py` | How much year-over-year unpredictability is noise vs skill Pitching+ misses? | pitch caches (`--caches`) |
+| `13_reliability_vs_sample_size.py` | Which metric (adjT, Stuff+, Location+, or a blend) predicts next-season adjT best at a GIVEN pitch count? Portal sample-size table. | pitch caches (`--caches`) |
 
 **Run 01 first, every time the source data changes.** If its prints do not match
 the anchor table in RESULTS.md, stop and reconcile before trusting anything else.
@@ -55,3 +56,5 @@ the anchor table in RESULTS.md, stop and reconcile before trusting anything else
   with `--level D1` if they are absent. Years are re-derived from `Date`, so caches
   holding role-relabeled years are safe to pass.
 - Evaluation protocol and score-design principles: `../FRAMEWORK.md`.
+- Script 13's decomposition/derivation, and why it's a different question from
+  script 12's: `METHODS.md`.

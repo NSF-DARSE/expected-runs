@@ -87,3 +87,13 @@ def test_out_of_range_percentile_is_rejected():
     bad["pitchers/1000123.json"]["arsenal"][0]["percentiles"] = [140]
     with pytest.raises(ValueError, match="percentile"):
         validate_pitcher_bundle(bad)
+
+
+def test_non_positive_display_sd_is_rejected():
+    """A zero or negative display sd means the scale is degenerate; every score
+    derived from it would be garbage or a division error.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["model_artifacts.json"]["byPitchType"]["FF"]["displaySd"] = 0.0
+    with pytest.raises(ValueError, match="displaySd"):
+        validate_pitcher_bundle(bad)

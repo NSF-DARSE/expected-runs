@@ -129,7 +129,11 @@ def main() -> int:
         out = pathlib.Path(args.workdir) / "bundle"
         out.mkdir(parents=True, exist_ok=True)
         for name, payload in bundle.items():
-            (out / name).write_text(json.dumps(to_native(payload), indent=2, allow_nan=False))
+            # Bundle keys can be nested (e.g. "pitchers/1000123.json"), so the
+            # per-file parent has to exist before the write, not just <workdir>/bundle.
+            dest = out / name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(json.dumps(to_native(payload), indent=2, allow_nan=False))
         print(f"[dry-run] wrote {len(bundle)} files to {out}")
         return 0
 

@@ -53,6 +53,8 @@ Horizontal bars, one per trait, in Stuff+ points, sorted by absolute contributio
 
 Each row also carries the trait's measured value and its percentile against the qualified population for that pitch type — the three columns the Power BI's attribute table showed, for the same reason. The contribution says how much the trait moves the grade; the value and percentile say whether the trait itself is any good. A coach needs both to have the conversation: "your extension is 7 feet, which is 85th percentile, and it is worth +9 points to you."
 
+The percentile is shown for his typical pitch of that type, not for an individual selected pitch. Ranking one pitch would need a pitch-level reference population rather than the pitcher-level one, which is a second reference for the same word — the thing Decision 2 exists to avoid. A selected individual pitch therefore shows its value and its contribution, and no percentile. Percentiles are computed in the publisher, since they need the reference population and that is far larger than the page.
+
 Two baselines, depending on what is selected:
 
 - **Pitch-type average selected (default).** Contributions are measured against the qualified population mean. Reads as "why his fastball grades 124 rather than 100."
@@ -108,7 +110,8 @@ Per-pitcher files are therefore keyed by TrackMan's `PitcherId`, which is alread
       "loc": 103,
       "trendStuff": -6.2,
       "aboveFloor": true,
-      "typical": [2350, 6.8, -13.7, 18.0, 89.2, 5.4, -1.1, 2.5, 1.2, -3.0, 0, 0]
+      "typical": [2350, 6.8, -13.7, 18.0, 89.2, 5.4, -1.1, 2.5, 1.2, -3.0, 0, 0],
+      "percentiles": [61, 85, 32, 74, 80, 30, 20, 55, 48, 40, 0, 0]
     }
   ],
   "outings": [

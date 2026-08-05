@@ -1,4 +1,6 @@
+import argparse
 import os
+import sys
 from collections import defaultdict
 from datetime import datetime
 
@@ -257,13 +259,39 @@ def build_final_dataset(base_path, years, summary_path, out_dir, save=True):
     return final_df
 
 
+def output_path(out_dir, out_name=None):
+    """Where the final dataset lands.
+
+    A scheduled run must pass --out-name so the next stage can predict the path.
+    The clock-based default is kept only for interactive one-off builds.
+    """
+    if out_name:
+        return os.path.join(out_dir, out_name)
+    return os.path.join(out_dir, f"Final_Target_Calc_{datetime.now().strftime('%H%M')}.csv")
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Build Final_Target_Calc from the game-file tree.")
+    ap.add_argument("--base-path", required=True,
+                    help="root of the year/month/day/CSV game tree")
+    ap.add_argument("--years", required=True,
+                    help="comma-separated years, e.g. 2025,2026")
+    ap.add_argument("--summary-path", required=True,
+                    help="game-state summary parquet/csv path")
+    ap.add_argument("--out-dir", required=True)
+    ap.add_argument("--out-name", default=None,
+                    help="deterministic output filename; required for scheduled runs")
+    args = ap.parse_args(argv)
+
+    years = [y.strip() for y in args.years.split(",") if y.strip()]
+    out = output_path(args.out_dir, args.out_name)
+    df = build_final_dataset(args.base_path, years, args.summary_path, args.out_dir, save=False)
+    df.to_csv(out, index=False)
+    print(f"wrote {out} ({len(df)} rows)")
+    return 0
+
+
 # ---------------- RUN ----------------
 # Guarded so the module can be imported (and tested) without kicking off a full build.
 if __name__ == "__main__":
-    final_df = build_final_dataset(
-        base_path="/Users/suma/Downloads/Baseball_Project/v3",
-        years=["2024", "2025"],
-        summary_path="/Users/suma/Downloads/Baseball_Project/CSV_files/game_state_summary_file/GameState_Summary.csv",
-        out_dir="/Users/suma/Downloads/Baseball_Project/CSV_files/corrected_target_outputs",
-        save=True
-    )
+    sys.exit(main())

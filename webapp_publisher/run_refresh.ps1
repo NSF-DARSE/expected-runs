@@ -5,7 +5,11 @@
 # control which season is graded.
 param(
   [int]$MaxRetries = 4,
-  [int]$TimeoutMinutes = 30
+  [int]$TimeoutMinutes = 30,
+  [string]$GameTree = $env:STUFFPLUS_GAME_TREE,
+  [string]$SummaryPath = $env:STUFFPLUS_SUMMARY,
+  [string]$Years = $env:STUFFPLUS_YEARS,
+  [switch]$SkipPipeline
 )
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot\..
@@ -21,6 +25,37 @@ for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
     if ($remainingSec -le 0) { Write-Error "Refresh exceeded ${TimeoutMinutes}m timeout"; exit 1 }
     $stdoutLog = Join-Path $logDir "refresh-$dateStamp-attempt$attempt.log"
     $stderrLog = Join-Path $logDir "refresh-$dateStamp-attempt$attempt.err.log"
+    if (-not $SkipPipeline) {
+      if (-not $GameTree -or -not $SummaryPath -or -not $Years) {
+        throw "GameTree, SummaryPath and Years are required unless -SkipPipeline is passed"
+      }
+      if (-not $env:STUFFPLUS_WORKDIR) { throw "STUFFPLUS_WORKDIR must be set" }
+      # Deterministic filename so the scorer stage can predict the path. The
+      # pipeline's own default is wall-clock based and unusable from a schedule.
+      $targetCsv = Join-Path $env:STUFFPLUS_WORKDIR "Final_Target_Calc_current.csv"
+      $pipeOut = Join-Path $logDir "refresh-$dateStamp-attempt$attempt-pipeline.log"
+      $pipeErr = Join-Path $logDir "refresh-$dateStamp-attempt$attempt-pipeline.err.log"
+      $pipeProc = Start-Process -FilePath "python" -ArgumentList @(
+        "python_files\target_and_calculated_pipeline.py",
+        "--base-path", $GameTree,
+        "--years", $Years,
+        "--summary-path", $SummaryPath,
+        "--out-dir", $env:STUFFPLUS_WORKDIR,
+        "--out-name", "Final_Target_Calc_current.csv"
+      ) -NoNewWindow -PassThru -RedirectStandardOutput $pipeOut -RedirectStandardError $pipeErr
+      if (-not $pipeProc.WaitForExit($remainingSec * 1000)) {
+        try { $pipeProc.Kill() } catch {}
+        throw "target pipeline timed out after ${remainingSec}s (attempt $attempt)"
+      }
+      if ($pipeProc.ExitCode -ne 0) {
+        throw "target pipeline exited with code $($pipeProc.ExitCode) (attempt $attempt)"
+      }
+      # publish.py reads STUFFPLUS_DATA; point it at what we just built.
+      $env:STUFFPLUS_DATA = $targetCsv
+      # Recompute the remaining budget so publish gets the time actually left.
+      $remainingSec = [int]([Math]::Floor(($deadline - (Get-Date)).TotalSeconds))
+      if ($remainingSec -le 0) { throw "no time left for publish after pipeline (attempt $attempt)" }
+    }
     $proc = Start-Process -FilePath "python" -ArgumentList @("-m","webapp_publisher.publish") -NoNewWindow -PassThru -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog
     if (-not $proc.WaitForExit($remainingSec * 1000)) {
       try { $proc.Kill() } catch {}

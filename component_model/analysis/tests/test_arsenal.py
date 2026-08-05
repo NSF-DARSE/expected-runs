@@ -48,3 +48,66 @@ def test_display_scale_uses_only_rows_above_the_floor():
     mu, sd = ar.display_scale(means, floor_mask)
     assert mu == pytest.approx(0.0)
     assert sd == pytest.approx(np.std([0.0, 0.01, -0.01], ddof=1))
+
+
+def _toy_model(n_feats=4, seed=3):
+    """A standardizer + linear model whose parameters we control exactly."""
+    rng = np.random.default_rng(seed)
+    scaler_mean = rng.normal(0, 1, n_feats)
+    scaler_scale = rng.uniform(0.5, 2.0, n_feats)
+    coef = rng.normal(0, 0.01, n_feats)
+    return scaler_mean, scaler_scale, coef
+
+
+def test_contributions_sum_to_the_display_gap_exactly():
+    """The load-bearing property. Ridge on standardized features is linear, so
+    the per-trait contributions must account for the ENTIRE difference in Stuff+
+    between the subject and its baseline -- no residual, no rounding slack.
+    Exact equality, because any tolerance here would hide a real bug.
+    """
+    scaler_mean, scaler_scale, coef = _toy_model()
+    sd = 0.02
+    subject = np.array([1.4, -0.3, 0.8, 2.1])
+    baseline = np.array([0.2, 0.1, -0.4, 0.9])
+
+    baseline_z = (baseline - scaler_mean) / scaler_scale
+    contrib = ar.contributions(subject, scaler_mean, scaler_scale, coef, baseline_z, sd)
+
+    # Ridge prediction is intercept + z @ coef, so the intercept cancels in a gap.
+    subject_pred = ((subject - scaler_mean) / scaler_scale) @ coef
+    baseline_pred = baseline_z @ coef
+    display_gap = ar.to_display(subject_pred, 0.0, sd) - ar.to_display(baseline_pred, 0.0, sd)
+
+    assert contrib.sum() == pytest.approx(display_gap, abs=1e-10)
+
+
+def test_contributions_are_zero_when_subject_equals_baseline():
+    scaler_mean, scaler_scale, coef = _toy_model()
+    subject = np.array([1.4, -0.3, 0.8, 2.1])
+    baseline_z = (subject - scaler_mean) / scaler_scale
+    contrib = ar.contributions(subject, scaler_mean, scaler_scale, coef, baseline_z, 0.02)
+    assert np.allclose(contrib, 0.0, atol=1e-12)
+
+
+def test_contribution_sign_follows_the_display_convention():
+    """A feature that LOWERS expected runs must show a POSITIVE contribution,
+    because the display scale is higher-is-better.
+    """
+    scaler_mean = np.array([0.0])
+    scaler_scale = np.array([1.0])
+    coef = np.array([-0.01])  # more of this feature => fewer runs => better
+    contrib = ar.contributions(np.array([2.0]), scaler_mean, scaler_scale, coef,
+                               baseline_z=np.array([0.0]), sd=0.02)
+    assert contrib[0] > 0
+
+
+def test_percentile_ranks_against_the_reference_population():
+    ref = np.array([1.0, 2.0, 3.0, 4.0])
+    assert ar.percentile(ref, 0.5) == 0
+    assert ar.percentile(ref, 2.5) == 50
+    assert ar.percentile(ref, 5.0) == 100
+
+
+def test_percentile_ignores_missing_reference_values():
+    ref = np.array([1.0, np.nan, 3.0, np.nan])
+    assert ar.percentile(ref, 2.0) == 50

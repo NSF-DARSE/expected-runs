@@ -57,3 +57,40 @@ def display_scale(pitcher_means, floor_mask) -> tuple[float, float]:
     if vals.size < 2:
         raise ValueError(f"need 2+ qualifying pitchers to set a scale, got {vals.size}")
     return float(vals.mean()), float(vals.std(ddof=1))
+
+
+def contributions(feature_values, scaler_mean, scaler_scale, coef, baseline_z, sd):
+    """Per-feature contribution to Stuff+, in display points.
+
+    This is the formula already used in 08_staff_scores.py, kept identical so the
+    Staff Board and the pitcher page explain a grade the same way:
+
+        z            = (value - scaler_mean) / scaler_scale
+        contribution = -15 * (z - baseline_z) * coef / sd
+
+    baseline_z is the standardized baseline the gap is measured against: the
+    qualified-population mean for the default view, or the pitcher's own typical
+    pitch when a single pitch is selected.
+
+    Because the model is linear in standardized features, these sum exactly to the
+    Stuff+ difference between subject and baseline.
+    """
+    if sd <= 0:
+        raise ValueError(f"display sd must be positive, got {sd}")
+    z = (np.asarray(feature_values, dtype=float) - np.asarray(scaler_mean, dtype=float)) / np.asarray(
+        scaler_scale, dtype=float
+    )
+    return -DISPLAY_SPREAD * (z - np.asarray(baseline_z, dtype=float)) * np.asarray(coef, dtype=float) / sd
+
+
+def percentile(reference_values, value) -> int:
+    """Percentile rank of value within reference_values, 0-100.
+
+    Reference is the qualifying population for one pitch type. NaNs are dropped
+    rather than propagated, since a feature can be missing for some pitches.
+    """
+    ref = np.asarray(reference_values, dtype=float)
+    ref = ref[~np.isnan(ref)]
+    if ref.size == 0:
+        raise ValueError("percentile needs a non-empty reference population")
+    return int(round(100.0 * float((ref < value).mean())))

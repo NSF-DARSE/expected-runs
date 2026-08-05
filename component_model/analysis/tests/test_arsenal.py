@@ -163,3 +163,22 @@ def test_recent_change_differences_the_two_thirty_day_windows():
     })
     got = ar.recent_change(outings, floor_n=30, asof="2026-03-10")
     assert got == pytest.approx(12.0)
+
+
+def test_type_mask_uses_the_is_ff_flag_for_four_seams():
+    """FF must come from is_ff, which already unifies the three source spellings,
+    rather than from a literal string match that would silently drop two of them.
+    """
+    pit = pd.DataFrame({
+        "TaggedPitchType": ["Fastball", "FourSeamFastBall", "FourSeamFastball", "Slider"],
+        "is_ff": [True, True, True, False],
+    })
+    assert list(ar.type_mask(pit, None)) == [True, True, True, False]
+
+
+def test_type_mask_treats_two_seam_as_sinker():
+    pit = pd.DataFrame({
+        "TaggedPitchType": ["Sinker", "TwoSeamFastBall", "Slider"],
+        "is_ff": [False, False, False],
+    })
+    assert list(ar.type_mask(pit, {"Sinker", "TwoSeamFastBall"})) == [True, True, False]

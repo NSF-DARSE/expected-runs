@@ -135,3 +135,55 @@ def recent_change(outings: pd.DataFrame, floor_n: int, asof: str) -> float | Non
     recent_mean = np.average(recent["stuff"].values, weights=recent["n"].values)
     prior_mean = np.average(prior["stuff"].values, weights=prior["n"].values)
     return float(recent_mean - prior_mean)
+
+
+def type_mask(pit: pd.DataFrame, tags: set[str] | None) -> pd.Series:
+    """Row mask selecting one pitch type.
+
+    tags=None means four-seam, taken from the frame's is_ff flag because that
+    flag already unifies the three spellings the source data uses.
+    """
+    if tags is None:
+        return pit["is_ff"]
+    return pit["TaggedPitchType"].isin(tags)
+
+
+def fit_type(pit: pd.DataFrame, tags: set[str] | None, floor_n: int, fc_module, season_year: int) -> dict:
+    """Fit the ridge for one pitch type and derive its display scale.
+
+    Protocol copied from build_portal_data.py (arsenal grade, adopted 2026-07-23):
+    one ridge per pitch type via fc.stuff_ridge(pitch_mask=...), then a display
+    scale from that type's qualifying pitchers.
+
+    season_year is the canonical year role to grade (fair_criterion relabels the
+    year pair to 2024/2025 roles, so pass 2025 for the later season).
+
+    Raises ValueError if the type has too few qualifying pitchers to scale.
+    """
+    mask = type_mask(pit, tags)
+    pp, model = fc_module.stuff_ridge(pit, pitch_mask=mask, return_model=True)
+    pp = pp[pp["PlateLocSide"].notna() & pp["PlateLocHeight"].notna()].copy()
+    season = pp[pp["year"] == season_year].copy()
+
+    per_pitcher = season.groupby("PitcherId")["ridge_pred"].agg(["size", "mean"])
+    mu, sd = display_scale(per_pitcher["mean"].values, (per_pitcher["size"] >= floor_n).values)
+
+    scaler = model.named_steps["standardscaler"]
+    coef = model.named_steps["ridge"].coef_
+    feats = fc_module.FEATS
+    qualified = per_pitcher.index[per_pitcher["size"] >= floor_n]
+    feature_means = season.groupby("PitcherId")[feats].mean()
+    population_mean_z = ((feature_means.loc[qualified].values - scaler.mean_) / scaler.scale_).mean(axis=0)
+
+    return {
+        "pitches": season,
+        "model": model,
+        "scaler_mean": scaler.mean_,
+        "scaler_scale": scaler.scale_,
+        "coef": coef,
+        "mu": mu,
+        "sd": sd,
+        "population_mean_z": population_mean_z,
+        "reference_features": feature_means.loc[qualified],
+        "n_qualified": int(len(qualified)),
+    }

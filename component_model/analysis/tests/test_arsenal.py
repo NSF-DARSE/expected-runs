@@ -111,3 +111,55 @@ def test_percentile_ranks_against_the_reference_population():
 def test_percentile_ignores_missing_reference_values():
     ref = np.array([1.0, np.nan, 3.0, np.nan])
     assert ar.percentile(ref, 2.0) == 50
+
+
+import pandas as pd
+
+
+def _toy_pitches():
+    """Two dates, known ridge_pred values, so aggregates are hand-checkable."""
+    return pd.DataFrame({
+        "Date": ["2026-03-01", "2026-03-01", "2026-03-08", "2026-03-08", "2026-03-08"],
+        "ridge_pred": [0.00, 0.02, -0.01, -0.03, 0.01],
+    })
+
+
+def test_outing_table_groups_by_date_and_grades_each_outing():
+    out = ar.outing_table(_toy_pitches(), mu=0.0, sd=0.02)
+    assert list(out["date"]) == ["2026-03-01", "2026-03-08"]
+    assert list(out["n"]) == [2, 3]
+    # First outing mean ridge_pred is 0.01 -> 100 - 15*(0.01/0.02) = 92.5
+    assert out.loc[0, "stuff"] == pytest.approx(92.5)
+
+
+def test_outing_grades_average_to_the_overall_grade_when_outings_are_equal_size():
+    """Sanity check that outing grades live on the same scale as everything else."""
+    pitches = pd.DataFrame({
+        "Date": ["2026-03-01", "2026-03-01", "2026-03-08", "2026-03-08"],
+        "ridge_pred": [0.00, 0.02, -0.01, -0.03],
+    })
+    out = ar.outing_table(pitches, mu=0.0, sd=0.02)
+    overall = ar.to_display(pitches["ridge_pred"].mean(), 0.0, 0.02)
+    assert out["stuff"].mean() == pytest.approx(overall, abs=1e-12)
+
+
+def test_recent_change_is_none_when_a_window_is_below_the_floor():
+    """A blank reads as 'not enough to say'; a zero would wrongly read as
+    'no change'. So below the floor must return None, never 0.0.
+    """
+    outings = pd.DataFrame({
+        "date": ["2026-01-05", "2026-03-01"],
+        "n": [40, 5],
+        "stuff": [110.0, 95.0],
+    })
+    assert ar.recent_change(outings, floor_n=30, asof="2026-03-10") is None
+
+
+def test_recent_change_differences_the_two_thirty_day_windows():
+    outings = pd.DataFrame({
+        "date": ["2026-01-20", "2026-03-01"],   # prior window, then recent window
+        "n": [50, 50],
+        "stuff": [100.0, 112.0],
+    })
+    got = ar.recent_change(outings, floor_n=30, asof="2026-03-10")
+    assert got == pytest.approx(12.0)

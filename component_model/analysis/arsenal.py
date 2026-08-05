@@ -19,6 +19,7 @@ in testable form.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 
 # (display name, TaggedPitchType values). None means "use the frame's is_ff flag",
 # which already covers the three source spellings of four-seam.
@@ -94,3 +95,43 @@ def percentile(reference_values, value) -> int:
     if ref.size == 0:
         raise ValueError("percentile needs a non-empty reference population")
     return int(round(100.0 * float((ref < value).mean())))
+
+
+RECENT_WINDOW_DAYS = 30
+
+
+def outing_table(pitches: pd.DataFrame, mu: float, sd: float) -> pd.DataFrame:
+    """One row per date the pitcher threw this pitch type.
+
+    Grades each outing with the same transform used at every other level, so
+    outing numbers are directly comparable to the pitch-type number.
+
+    Date is normalized to a YYYY-MM-DD string first: load_pitches leaves the
+    source Date column as-is, so it can arrive as either a string or a datetime,
+    and a datetime would stringify with a spurious " 00:00:00" into the bundle.
+    """
+    dates = pd.to_datetime(pitches["Date"]).dt.strftime("%Y-%m-%d")
+    g = pitches.assign(_date=dates).groupby("_date")["ridge_pred"].agg(["size", "mean"]).reset_index()
+    g.columns = ["date", "n", "mean_ridge"]
+    g = g.sort_values("date").reset_index(drop=True)
+    g["stuff"] = to_display(g["mean_ridge"].values, mu, sd)
+    return g[["date", "n", "stuff"]]
+
+
+def recent_change(outings: pd.DataFrame, floor_n: int, asof: str) -> float | None:
+    """Stuff+ over the trailing 30 days minus the 30 days before that.
+
+    Returns None when either window is below the sample floor, so the UI can
+    render a blank. A zero would be read as "no change", which is a different
+    and wrong claim.
+    """
+    asof_ts = pd.Timestamp(asof)
+    dates = pd.to_datetime(outings["date"])
+    recent = outings[(dates > asof_ts - pd.Timedelta(days=RECENT_WINDOW_DAYS)) & (dates <= asof_ts)]
+    prior_lo = asof_ts - pd.Timedelta(days=2 * RECENT_WINDOW_DAYS)
+    prior = outings[(dates > prior_lo) & (dates <= asof_ts - pd.Timedelta(days=RECENT_WINDOW_DAYS))]
+    if recent["n"].sum() < floor_n or prior["n"].sum() < floor_n:
+        return None
+    recent_mean = np.average(recent["stuff"].values, weights=recent["n"].values)
+    prior_mean = np.average(prior["stuff"].values, weights=prior["n"].values)
+    return float(recent_mean - prior_mean)

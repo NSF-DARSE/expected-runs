@@ -152,6 +152,36 @@ def build_grids(pit: pd.DataFrame) -> dict:
     return out
 
 
+def attach_location(pit: pd.DataFrame, state: dict, tags, fc_module, season_year: int) -> None:
+    """Attach Location+ run values to a fitted type's graded-season pitches.
+
+    Only four-seams get a value; Location+ is a fastball score, and secondary-pitch
+    location repeats year over year without predicting next-year outcomes.
+
+    The pooled map must be TRAINED on the earlier season (year role 2024) from the
+    FULL frame, then applied to the graded season. state["pitches"] holds only the
+    graded season, so training off it selects zero rows and yields an all-NaN map --
+    which is how this silently produced null Location+ for fastballs before.
+    """
+    season = state["pitches"]
+    if tags is not None:
+        season["loc"] = np.nan
+        return
+    ff_all = pit[ar.type_mask(pit, tags)].copy()
+    ff_all = ff_all[ff_all["PlateLocSide"].notna() & ff_all["PlateLocHeight"].notna()]
+    fc_module.add_loc_bins(ff_all)
+    train = ff_all[(ff_all["year"] != season_year) & ff_all["xT"].notna()]
+    if train.empty:
+        raise ValueError(
+            "no earlier-season four-seams with xT to train the location map; "
+            "Location+ would be all-NaN"
+        )
+    fc_module.add_loc_bins(season)
+    season["loc"] = fc_module.PooledLocationMap(train).apply(season)
+    if season["loc"].isna().all():
+        raise ValueError("location map produced all-NaN values for four-seams")
+
+
 def main() -> int:
     args = fc.paths()
     pit = fc.load_pitches(args)
@@ -165,14 +195,7 @@ def main() -> int:
         except ValueError as err:
             print(f"skipping {tname}: {err}")
             continue
-        # Location+ only matters for four-seams; attach it there and nowhere else.
-        if tname == "FF":
-            ff = state["pitches"]
-            fc.add_loc_bins(ff)
-            train = ff[(ff["year"] == 2024) & ff["xT"].notna()]
-            state["pitches"]["loc"] = fc.PooledLocationMap(train).apply(ff)
-        else:
-            state["pitches"]["loc"] = np.nan
+        attach_location(pit, state, tags, fc, SEASON_ROLE_YEAR)
         fitted[tname] = state
         print(f"{tname}: {len(state['pitches'])} pitches, {state['n_qualified']} qualified")
 

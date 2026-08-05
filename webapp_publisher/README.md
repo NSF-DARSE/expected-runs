@@ -26,6 +26,13 @@ notebook by hand.
    application/json` and `cache-control: no-cache` so the web app never
    serves a stale cached copy.
 
+The bundle also carries the pitcher development page files: `location_maps.json`
+(count-conditioned run-value surface, shared), `model_artifacts.json` (ridge
+coefficients, scaler, display moments, plain-English labels), and one
+`pitchers/{pitcherId}.json` per pitcher. These come from
+`component_model/analysis/14_pitcher_pages.py` and are keyed by TrackMan
+PitcherId, which is stable across seasons.
+
 ## Running it
 
 ### Season and data-through labels

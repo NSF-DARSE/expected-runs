@@ -9,11 +9,13 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from webapp_publisher.build_bundle import build_bundle, to_native
-from webapp_publisher.schema import validate_bundle
+from webapp_publisher.build_pitcher_bundle import build_pitcher_bundle, pitcher_index
+from webapp_publisher.schema import validate_bundle, validate_pitcher_bundle
 from webapp_publisher.upload import upload_bundle
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 SCORER = REPO / "component_model" / "analysis" / "08_staff_scores.py"
+PITCHER_SCORER = REPO / "component_model" / "analysis" / "14_pitcher_pages.py"
 
 
 def _load_env_file() -> None:
@@ -82,6 +84,16 @@ def run_scorer(data: str, workdir: str, team: str) -> dict:
     return json.loads(out.read_text())
 
 
+def run_pitcher_scorer(data: str, workdir: str, team: str) -> dict:
+    workdir_p = pathlib.Path(workdir)
+    cmd = [sys.executable, str(PITCHER_SCORER), "--data", data, "--workdir", workdir, "--team", team]
+    subprocess.run(cmd, check=True)  # raises CalledProcessError -> loud failure
+    out = workdir_p / "pitcher_pages.json"
+    if not out.exists():
+        raise FileNotFoundError(f"pitcher scorer did not produce {out}")
+    return json.loads(out.read_text())
+
+
 def main() -> int:
     _load_env_file()
 
@@ -106,6 +118,11 @@ def main() -> int:
     staff_scores = run_scorer(args.data, args.workdir, args.team)
     built = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     bundle = build_bundle(staff_scores, season=season, data_through=data_through, built_iso=built)
+    pages = run_pitcher_scorer(args.data, args.workdir, args.team)
+    pitcher_files = build_pitcher_bundle(pages)
+    validate_pitcher_bundle(pitcher_files)
+    bundle["manifest.json"]["pitchers"] = pitcher_index(pages)
+    bundle.update(pitcher_files)
     validate_bundle(bundle)
 
     if args.dry_run:

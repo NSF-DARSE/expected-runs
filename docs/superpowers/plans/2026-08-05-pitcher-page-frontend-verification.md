@@ -219,9 +219,13 @@ the surface, a thin type saying so), and run the coach review.
 - **The unlinked-pitcher branch is untested against real data** — all 18 rows linked
   here. It is covered by fixture only.
 - **The pooled-fallback path is untested against real data.** Finding C.
-- **`build_grids` still selects training rows with `year == 2024`** rather than
-  `!= season_year`, carried over from the data layer's pass. Not broken today; same
-  latent hazard that produced that plan's first Critical.
+- ~~`build_grids` still selects training rows with `year == 2024`.~~ **Struck: this was
+  false.** `14_pitcher_pages.py:146` already reads
+  `train[(train["year"] != SEASON_ROLE_YEAR) & train["xT"].notna()]`, and has since
+  before this branch. The item was copied verbatim out of the data layer's deferred list
+  without being checked against the code, which is the same failure the data layer's own
+  record had to correct once — a note asserting a defect that no longer exists invites
+  someone to "fix" working code. Verified by reading the line.
 - **The managed Functions still have no telemetry path.** Adding
   `APPLICATIONINSIGHTS_CONNECTION_STRING` as a Static Web App setting is the last item of
   the plan's Task 10 and was deliberately left for the repo owner: on some CLI versions

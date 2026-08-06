@@ -35,10 +35,18 @@ DISPLAY_BAND = (40.0, 160.0)
 # Per-pitch grades (g) spread wider than season aggregates: measured on a real
 # bundle, four-seam per-pitch g ranges ~20-147 with per-pitcher standard
 # deviations of 8.9-16.0. DISPLAY_BAND would reject legitimate real data at
-# either edge, so PITCH_GRADE_BAND is deliberately wider -- comfortably
-# admitting the measured 20-147 range while still well outside reach of a raw
-# run value (~0.00x).
-PITCH_GRADE_BAND = (10.0, 190.0)
+# either edge, so PITCH_GRADE_BAND is deliberately wider.
+#
+# On how wide: be honest about what this band can and cannot detect. A raw
+# ridge_pred is |v| < ~0.2, so ANY lower bound above ~0.5 catches an unscaled
+# value just as decisively as a tight one buys nothing extra. What a band cannot
+# catch on `g` or `stuff` is a POLARITY flip -- 100 + 15z lands in 40-160 the
+# same as 100 - 15z does, which is why the original loc guard worked only because
+# loc was arriving raw. So the band's whole job is "unscaled value", and every
+# point of tightness beyond that is pure downside: one real team's worst pitch
+# already grades 19.9, leaving under 10 points of headroom, and a genuinely awful
+# pitch on some other staff would abort a publish for no diagnostic gain.
+PITCH_GRADE_BAND = (1.0, 250.0)
 
 
 def _check_display_band(value, band, *, key, field, ptype):

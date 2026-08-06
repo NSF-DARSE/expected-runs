@@ -154,6 +154,26 @@ def test_pitch_grade_at_measured_real_spread_edges_is_accepted():
     validate_pitcher_bundle(good_high)  # must not raise
 
 
+def test_pitch_grade_band_admits_an_awful_grade_but_rejects_an_unscaled_one():
+    """Pins what the band is actually for, so nobody tightens it back.
+
+    A raw ridge_pred is |v| < ~0.2, so the band's only real job is catching an
+    unscaled value; a polarity flip is undetectable here either way, since
+    100 + 15z occupies the same range as 100 - 15z. That makes every point of
+    extra tightness pure downside. One real team's worst pitch already grades
+    19.9, so a genuinely dreadful pitch on some other staff must not abort a
+    publish.
+    """
+    awful = copy.deepcopy(GOOD)
+    awful["pitchers/1000123.json"]["pitches"][0]["g"] = 5.0
+    validate_pitcher_bundle(awful)  # bad pitch, still a real score: must not raise
+
+    unscaled = copy.deepcopy(GOOD)
+    unscaled["pitchers/1000123.json"]["pitches"][0]["g"] = 0.02
+    with pytest.raises(ValueError, match="pitch grade"):
+        validate_pitcher_bundle(unscaled)
+
+
 def test_arsenal_pitch_type_missing_from_model_artifacts_is_rejected():
     """The frontend treats a byPitchType entry for every arsenal type as an
     unstated precondition (missing artifact reads a sample floor as 0 and a

@@ -6,13 +6,43 @@
 param(
   [int]$MaxRetries = 4,
   [int]$TimeoutMinutes = 30,
-  [string]$GameTree = $env:STUFFPLUS_GAME_TREE,
-  [string]$SummaryPath = $env:STUFFPLUS_SUMMARY,
-  [string]$Years = $env:STUFFPLUS_YEARS,
+  [string]$GameTree,
+  [string]$SummaryPath,
+  [string]$Years,
   [switch]$SkipPipeline
 )
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot\..
+
+# Load webapp_publisher\.env into the process environment. publish.py loads it
+# too, but only in the child process -- the pipeline stage and the checks below
+# run here, so without this a scheduled task (which passes nothing on the command
+# line) had $Years empty and failed identically on every attempt. Anything already
+# set in the environment wins, so an explicit setting is never overwritten.
+$envFile = Join-Path $PSScriptRoot ".env"
+if (Test-Path $envFile) {
+  foreach ($line in Get-Content $envFile) {
+    $t = $line.Trim()
+    if (-not $t -or $t.StartsWith("#")) { continue }
+    $split = $t.IndexOf("=")
+    if ($split -lt 1) { continue }
+    $key = $t.Substring(0, $split).Trim()
+    $val = $t.Substring($split + 1).Trim()
+    if ($val.Length -ge 2 -and (($val.StartsWith('"') -and $val.EndsWith('"')) -or
+                                ($val.StartsWith("'") -and $val.EndsWith("'")))) {
+      $val = $val.Substring(1, $val.Length - 2)
+    }
+    if (-not [Environment]::GetEnvironmentVariable($key, "Process")) {
+      [Environment]::SetEnvironmentVariable($key, $val, "Process")
+    }
+  }
+}
+
+# Resolved AFTER the loader, not in param() defaults: those evaluate before the
+# script body runs, so they would bind whatever was in the environment first.
+if (-not $GameTree)    { $GameTree = $env:STUFFPLUS_GAME_TREE }
+if (-not $SummaryPath) { $SummaryPath = $env:STUFFPLUS_SUMMARY }
+if (-not $Years)       { $Years = $env:STUFFPLUS_YEARS }
 $logDir = Join-Path $PSScriptRoot "logs"
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
 $dateStamp = (Get-Date).ToString("yyyy-MM-dd")

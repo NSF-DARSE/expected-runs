@@ -88,12 +88,19 @@ scheduler). `.env` is git-ignored and blocked from being staged by a repo
 deny rule — **Jack stages/creates `.env` himself**; this repo only ever
 tracks `.env.example` with placeholders.
 
-Scheduled runs also need `STUFFPLUS_GAME_TREE` (root of the `year/month/day/CSV`
-game tree, filled by either the FTP mirror or `trackman_api/backfill.py --refresh`),
-`STUFFPLUS_SUMMARY` (game-state summary path), and `STUFFPLUS_YEARS`. The refresh
-regenerates `Final_Target_Calc_current.csv` in the workdir and points the scorer at
-it, so new games reach the page without a manual rebuild. Pass `-SkipPipeline` to
-reuse an existing `STUFFPLUS_DATA` CSV instead.
+On top of `STUFFPLUS_YEARS` and `STUFFPLUS_WORKDIR`, the pipeline stage of a
+scheduled run reads two more `.env` keys: `STUFFPLUS_GAME_TREE` (root of the
+`year/month/day/CSV` game tree, filled by either the FTP mirror or
+`trackman_api/backfill.py --refresh`) and `STUFFPLUS_SUMMARY` (game-state summary
+path). It regenerates `Final_Target_Calc_current.csv` in the workdir and points the
+scorer at it, so new games reach the page without a manual rebuild. Pass
+`-SkipPipeline` to reuse an existing `STUFFPLUS_DATA` CSV instead.
+
+`run_refresh.ps1` parses `webapp_publisher/.env` itself before it uses any of
+these, because the pipeline stage runs in PowerShell and `publish.py`'s own `.env`
+load only reaches the child process. Values already present in the environment
+win, so a value passed on the command line or set by the scheduler is never
+overridden.
 
 ### Scheduled task
 

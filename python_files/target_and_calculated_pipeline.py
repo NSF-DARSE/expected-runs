@@ -284,6 +284,10 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     years = [y.strip() for y in args.years.split(",") if y.strip()]
+    # save=False skips build_final_dataset's own makedirs, and we write below
+    # regardless, so a first run against a not-yet-created workdir would do the
+    # entire build and then fail at the write.
+    os.makedirs(args.out_dir, exist_ok=True)
     out = output_path(args.out_dir, args.out_name)
     df = build_final_dataset(args.base_path, years, args.summary_path, args.out_dir, save=False)
     df.to_csv(out, index=False)

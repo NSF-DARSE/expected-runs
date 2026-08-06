@@ -206,6 +206,18 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
+# Level II data artifacts (licensed TrackMan data and anything derived from it).
+# These are outputs of the pipeline, the scorers, and the publisher; none of them
+# belong in git, and one `git add -A` was all it took.
+Final_Target_Calc*.csv
+*.parquet
+staff_scores.json
+pitcher_pages.json
+scratch_*.csv
+bundle/
+# ...except the checked-in test fixture, which is synthetic, not licensed data.
+!webapp_publisher/tests/fixtures/staff_scores.json
+
 # UD Athletics additions
 *.key
 *.pem

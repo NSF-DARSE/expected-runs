@@ -6,10 +6,10 @@ import subprocess
 import sys
 
 PIPELINE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        "python_files", "target_and_calculated_pipeline.py")
-if not os.path.exists(PIPELINE):
-    PIPELINE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                            "target_and_calculated_pipeline.py")
+                        "target_and_calculated_pipeline.py")
+# Asserted rather than probed, so moving the script fails here loudly instead of
+# quietly resolving to a path that never existed.
+assert os.path.exists(PIPELINE), f"pipeline script not found at {PIPELINE}"
 
 
 def test_module_imports_without_running_a_build():

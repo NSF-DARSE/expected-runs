@@ -1,3 +1,5 @@
+import copy
+
 import pytest
 
 from webapp_publisher.build_pitcher_bundle import build_pitcher_bundle, pitcher_index
@@ -53,10 +55,24 @@ def test_model_artifact_preserves_feature_order():
 
 
 def test_model_artifact_includes_plain_english_labels_for_every_feature():
+    """Presence only. A label equal to the field name is correct for features that
+    are already plain English ("Extension"), so asserting labels[feat] != feat
+    re-encodes the defect that check was removed for.
+    """
     out = build_pitcher_bundle(PAGES)
     labels = out["model_artifacts.json"]["labels"]
     for feat in out["model_artifacts.json"]["featureOrder"]:
-        assert feat in labels and labels[feat] != feat
+        assert feat in labels
+
+
+def test_unlabeled_feature_stops_the_build():
+    """An unlabeled feature would reach a coach as a raw column name, so the
+    publisher refuses to build rather than shipping it.
+    """
+    pages = copy.deepcopy(PAGES)
+    pages["model"]["featureOrder"] = ["SpinRate", "NotARealFeature"]
+    with pytest.raises(ValueError, match="NotARealFeature"):
+        build_pitcher_bundle(pages)
 
 
 def test_pitcher_index_is_manifest_sized_not_the_whole_payload():

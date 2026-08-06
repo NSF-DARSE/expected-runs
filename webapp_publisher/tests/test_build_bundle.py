@@ -6,6 +6,10 @@ FIX = pathlib.Path(__file__).parent / "fixtures" / "staff_scores.json"
 def test_build_bundle_shapes_manifest_and_board():
     staff_scores = json.loads(FIX.read_text())
     bundle = build_bundle(staff_scores, season=2026, data_through="2026-03-15", built_iso="2026-07-24T02:00:00Z")
+    # stamp_pitcher_ids is called in publish.py before validation, so we don't test it here.
+    # This test validates build_bundle's output shape only.
+    for r in bundle["staff_board.json"]["pitchers"]:
+        r["pitcherId"] = 1000101
 
     manifest = bundle["manifest.json"]
     assert manifest == {"built": "2026-07-24T02:00:00Z", "season": 2026,
@@ -17,7 +21,7 @@ def test_build_bundle_shapes_manifest_and_board():
     row = board["pitchers"][0]
     assert set(row) == {"id","name","hand","ff","stuff","loc","adjres","pitch",
                         "whiff","zone","heart","meanHeight","locFlag","stuffAttr",
-                        "stuffNoHand","pitchNoHand","stuffAttrNoHand"}
+                        "stuffNoHand","pitchNoHand","stuffAttrNoHand","pitcherId"}
     assert isinstance(row["id"], int)
     assert row["locFlag"] in ("", "caution", "small sample")
     assert isinstance(row["stuffAttr"], list) and isinstance(row["stuffAttr"][0], list)
@@ -40,6 +44,7 @@ import pytest
 def test_validate_bundle_rejects_bad_flag():
     staff_scores = json.loads((pathlib.Path(__file__).parent/"fixtures"/"staff_scores.json").read_text())
     bundle = build_bundle(staff_scores, season=2026, data_through="2026-03-15", built_iso="x")
+    bundle["staff_board.json"]["pitchers"][0]["pitcherId"] = 1000101
     bundle["staff_board.json"]["pitchers"][0]["locFlag"] = "nope"
     with pytest.raises(ValueError):
         validate_bundle(bundle)
@@ -47,6 +52,8 @@ def test_validate_bundle_rejects_bad_flag():
 def test_validate_bundle_rejects_missing_manifest_key():
     staff_scores = json.loads((pathlib.Path(__file__).parent/"fixtures"/"staff_scores.json").read_text())
     bundle = build_bundle(staff_scores, season=2026, data_through="2026-03-15", built_iso="x")
+    for r in bundle["staff_board.json"]["pitchers"]:
+        r["pitcherId"] = 1000101
     del bundle["manifest.json"]["season"]
     with pytest.raises(ValueError):
         validate_bundle(bundle)
@@ -54,6 +61,8 @@ def test_validate_bundle_rejects_missing_manifest_key():
 def test_validate_bundle_rejects_empty_pitchers():
     staff_scores = json.loads((pathlib.Path(__file__).parent/"fixtures"/"staff_scores.json").read_text())
     bundle = build_bundle(staff_scores, season=2026, data_through="2026-03-15", built_iso="x")
+    for r in bundle["staff_board.json"]["pitchers"]:
+        r["pitcherId"] = 1000101
     bundle["staff_board.json"]["pitchers"] = []
     with pytest.raises(ValueError):
         validate_bundle(bundle)

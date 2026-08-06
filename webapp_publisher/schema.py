@@ -1,7 +1,7 @@
 """Lightweight bundle validation — fail loudly before upload."""
 REQUIRED_ROW_KEYS = {"id","name","hand","ff","stuff","loc","adjres","pitch",
                      "whiff","zone","heart","meanHeight","locFlag","stuffAttr",
-                     "stuffNoHand","pitchNoHand","stuffAttrNoHand"}
+                     "stuffNoHand","pitchNoHand","stuffAttrNoHand","pitcherId"}
 
 def validate_bundle(bundle: dict) -> None:
     m = bundle["manifest.json"]

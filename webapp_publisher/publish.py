@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from webapp_publisher.build_bundle import build_bundle, to_native
-from webapp_publisher.build_pitcher_bundle import build_pitcher_bundle, pitcher_index
+from webapp_publisher.build_pitcher_bundle import build_pitcher_bundle, pitcher_index, stamp_pitcher_ids
 from webapp_publisher.schema import validate_bundle, validate_pitcher_bundle
 from webapp_publisher.upload import upload_bundle
 
@@ -122,6 +122,7 @@ def main() -> int:
     pitcher_files = build_pitcher_bundle(pages)
     validate_pitcher_bundle(pitcher_files)
     bundle["manifest.json"]["pitchers"] = pitcher_index(pages)
+    stamp_pitcher_ids(bundle, pages)
     bundle.update(pitcher_files)
     validate_bundle(bundle)
 

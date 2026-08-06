@@ -42,6 +42,25 @@ def pitcher_index(pages: dict) -> list[dict]:
             for p in pages["pitchers"]]
 
 
+def stamp_pitcher_ids(bundle: dict, pages: dict) -> None:
+    """Join the stable TrackMan PitcherId onto each staff-board row, by name.
+
+    The board's own `id` is a positional index into the sorted name list, so it
+    shifts whenever the roster changes and cannot name a file or appear in a URL.
+    Name is the only column the two sides share -- 08_staff_scores.py is a fixed
+    reference and does not emit PitcherId -- so a duplicate name is a hard error
+    rather than a coin flip that could route a coach to the wrong player.
+    """
+    by_name: dict[str, int] = {}
+    for p in pages["pitchers"]:
+        name = p["name"]
+        if name in by_name:
+            raise ValueError(f"more than one pitcher file claims the name {name!r}")
+        by_name[name] = int(p["pitcherId"])
+    for row in bundle["staff_board.json"]["pitchers"]:
+        row["pitcherId"] = by_name.get(row["name"])
+
+
 def build_pitcher_bundle(pages: dict) -> dict[str, dict]:
     model = dict(pages["model"])
     missing = [f for f in model["featureOrder"] if f not in FEATURE_LABELS]

@@ -78,3 +78,38 @@ def test_unlabeled_feature_stops_the_build():
 def test_pitcher_index_is_manifest_sized_not_the_whole_payload():
     idx = pitcher_index(PAGES)
     assert idx == [{"pitcherId": 1000123, "name": "Test-Pitcher, Alpha", "hand": "R"}]
+
+
+from webapp_publisher.build_pitcher_bundle import stamp_pitcher_ids
+
+
+def _bundle(names):
+    return {"staff_board.json": {"pitchers": [{"name": n, "pitch": 100.0} for n in names]}}
+
+
+def test_stamp_matches_by_name():
+    pages = {"pitchers": [{"pitcherId": 1000101, "name": "Test-Pitcher, Alpha", "hand": "R"},
+                          {"pitcherId": 1000102, "name": "Test-Pitcher, Bravo", "hand": "L"}]}
+    bundle = _bundle(["Test-Pitcher, Bravo", "Test-Pitcher, Alpha"])
+    stamp_pitcher_ids(bundle, pages)
+    got = {r["name"]: r["pitcherId"] for r in bundle["staff_board.json"]["pitchers"]}
+    assert got == {"Test-Pitcher, Alpha": 1000101, "Test-Pitcher, Bravo": 1000102}
+
+
+def test_stamp_leaves_none_when_no_pitcher_file():
+    # A pitcher on the board with no graded arsenal has no pitcher file. The row
+    # must still validate; the frontend renders it unlinked.
+    pages = {"pitchers": [{"pitcherId": 1000101, "name": "Test-Pitcher, Alpha", "hand": "R"}]}
+    bundle = _bundle(["Test-Pitcher, Alpha", "Test-Pitcher, Charlie"])
+    stamp_pitcher_ids(bundle, pages)
+    rows = {r["name"]: r["pitcherId"] for r in bundle["staff_board.json"]["pitchers"]}
+    assert rows["Test-Pitcher, Charlie"] is None
+
+
+def test_stamp_rejects_duplicate_names():
+    # Two pitcher files claiming one board name means the name join is unsafe and
+    # a coach could be routed to the wrong player. Fail loudly rather than pick one.
+    pages = {"pitchers": [{"pitcherId": 1000101, "name": "Test-Pitcher, Alpha", "hand": "R"},
+                          {"pitcherId": 1000199, "name": "Test-Pitcher, Alpha", "hand": "L"}]}
+    with pytest.raises(ValueError, match="more than one pitcher file"):
+        stamp_pitcher_ids(_bundle(["Test-Pitcher, Alpha"]), pages)

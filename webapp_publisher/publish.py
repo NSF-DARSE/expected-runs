@@ -50,26 +50,33 @@ def default_season() -> int:
     return max(years)
 
 
-def derive_data_through(data_path: str, season: int) -> str:
-    """Latest game date (YYYY-MM-DD) in `data_path` whose year == season.
+def derive_data_through(data_path: str, season: int, team: str) -> str:
+    """Latest game date (YYYY-MM-DD) `team` threw a pitch in `data_path`, within `season`.
 
-    Reads only the Date column. Dates may be strings ("2025-05-16") or
-    yyyymmdd integers/strings (20250516); both are handled. Fails loudly
-    (rather than silently falling back to "today") if the Date column is
-    missing or no rows match the season year -- a wrong-but-quiet label is
-    worse than a crash here.
+    `data_path` is the full population source (every D1 team), so the date
+    must be scoped to `team` -- otherwise it describes the whole population's
+    latest game, not the bundle's own team, which is a correctness defect
+    (the frontend renders this value next to that team's rows only).
+
+    Reads only the Date and PitcherTeam columns. Dates may be strings
+    ("2025-05-16") or yyyymmdd integers/strings (20250516); both are handled.
+    Fails loudly (rather than silently falling back to "today" or to the
+    population-wide maximum) if the Date column is missing or no rows match
+    both `team` and the season year -- a wrong-but-quiet label is worse than
+    a crash here.
     """
-    df = pd.read_csv(data_path, usecols=["Date"])
+    df = pd.read_csv(data_path, usecols=["Date", "PitcherTeam"])
     as_str = df["Date"].astype(str)
     parsed = pd.to_datetime(as_str, errors="coerce")
     still_missing = parsed.isna()
     if still_missing.any():
         yyyymmdd = pd.to_datetime(as_str[still_missing], format="%Y%m%d", errors="coerce")
         parsed.loc[still_missing] = yyyymmdd
-    in_season = parsed[parsed.dt.year == season]
+    in_season = parsed[(parsed.dt.year == season) & (df["PitcherTeam"] == team)]
     if in_season.empty:
-        raise ValueError(f"No rows in {data_path} with Date in season {season}; "
-                         f"cannot derive --data-through. Pass it explicitly if this is expected.")
+        raise ValueError(f"No rows in {data_path} with PitcherTeam == {team!r} and Date in "
+                         f"season {season}; cannot derive --data-through. Pass it explicitly "
+                         f"if this is expected.")
     return in_season.max().strftime("%Y-%m-%d")
 
 
@@ -113,7 +120,7 @@ def main() -> int:
         ap.error("--data and --workdir (or STUFFPLUS_DATA/STUFFPLUS_WORKDIR) required")
 
     season = args.season if args.season is not None else default_season()
-    data_through = args.data_through if args.data_through is not None else derive_data_through(args.data, season)
+    data_through = args.data_through if args.data_through is not None else derive_data_through(args.data, season, args.team)
 
     staff_scores = run_scorer(args.data, args.workdir, args.team)
     built = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

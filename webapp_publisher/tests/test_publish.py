@@ -25,28 +25,77 @@ def test_default_season_tracks_a_non_default_pair(monkeypatch):
 
 def test_derive_data_through_picks_max_date_for_season(tmp_path):
     csv = tmp_path / "data.csv"
-    pd.DataFrame({"Date": ["2025-03-01", "2025-05-16", "2024-11-01", "2025-04-10"]}).to_csv(csv, index=False)
-    assert derive_data_through(str(csv), 2025) == "2025-05-16"
+    pd.DataFrame({
+        "Date": ["2025-03-01", "2025-05-16", "2024-11-01", "2025-04-10"],
+        "PitcherTeam": ["FAKE_TEAM"] * 4,
+    }).to_csv(csv, index=False)
+    assert derive_data_through(str(csv), 2025, "FAKE_TEAM") == "2025-05-16"
+
+
+def test_derive_data_through_ignores_other_teams_later_dates(tmp_path):
+    """Regression for the shipped defect: dataThrough must reflect the target
+    team's own last game date, not the max across the whole population. The
+    other team here is given a date over a month later so the assertion is
+    unambiguous if the team filter is dropped.
+    """
+    csv = tmp_path / "data.csv"
+    pd.DataFrame({
+        "Date": ["2025-03-01", "2025-04-10", "2025-05-16", "2025-06-22"],
+        "PitcherTeam": ["FAKE_TEAM", "FAKE_TEAM", "FAKE_TEAM", "OTHER_TEAM"],
+    }).to_csv(csv, index=False)
+    assert derive_data_through(str(csv), 2025, "FAKE_TEAM") == "2025-05-16"
 
 
 def test_derive_data_through_handles_yyyymmdd_ints(tmp_path):
     csv = tmp_path / "data.csv"
-    pd.DataFrame({"Date": [20250301, 20250516, 20241101]}).to_csv(csv, index=False)
-    assert derive_data_through(str(csv), 2025) == "2025-05-16"
+    pd.DataFrame({
+        "Date": [20250301, 20250516, 20241101],
+        "PitcherTeam": ["FAKE_TEAM", "FAKE_TEAM", "FAKE_TEAM"],
+    }).to_csv(csv, index=False)
+    assert derive_data_through(str(csv), 2025, "FAKE_TEAM") == "2025-05-16"
 
 
 def test_derive_data_through_raises_when_no_rows_match_season(tmp_path):
     csv = tmp_path / "data.csv"
-    pd.DataFrame({"Date": ["2024-03-01", "2024-05-16"]}).to_csv(csv, index=False)
+    pd.DataFrame({
+        "Date": ["2024-03-01", "2024-05-16"],
+        "PitcherTeam": ["FAKE_TEAM", "FAKE_TEAM"],
+    }).to_csv(csv, index=False)
     with pytest.raises(ValueError):
-        derive_data_through(str(csv), 2025)
+        derive_data_through(str(csv), 2025, "FAKE_TEAM")
+
+
+def test_derive_data_through_raises_when_no_rows_match_team(tmp_path):
+    csv = tmp_path / "data.csv"
+    pd.DataFrame({
+        "Date": ["2025-03-01", "2025-05-16"],
+        "PitcherTeam": ["OTHER_TEAM", "OTHER_TEAM"],
+    }).to_csv(csv, index=False)
+    with pytest.raises(ValueError) as excinfo:
+        derive_data_through(str(csv), 2025, "FAKE_TEAM")
+    message = str(excinfo.value)
+    assert "FAKE_TEAM" in message
+    assert "2025" in message
+
+
+def test_derive_data_through_excludes_team_rows_in_a_different_season(tmp_path):
+    csv = tmp_path / "data.csv"
+    pd.DataFrame({
+        "Date": ["2024-03-01", "2024-05-16"],
+        "PitcherTeam": ["FAKE_TEAM", "FAKE_TEAM"],
+    }).to_csv(csv, index=False)
+    with pytest.raises(ValueError) as excinfo:
+        derive_data_through(str(csv), 2025, "FAKE_TEAM")
+    message = str(excinfo.value)
+    assert "FAKE_TEAM" in message
+    assert "2025" in message
 
 
 def test_derive_data_through_raises_when_date_column_missing(tmp_path):
     csv = tmp_path / "data.csv"
-    pd.DataFrame({"NotDate": ["2025-03-01"]}).to_csv(csv, index=False)
+    pd.DataFrame({"NotDate": ["2025-03-01"], "PitcherTeam": ["FAKE_TEAM"]}).to_csv(csv, index=False)
     with pytest.raises(ValueError):
-        derive_data_through(str(csv), 2025)
+        derive_data_through(str(csv), 2025, "FAKE_TEAM")
 
 
 def test_dry_run_writes_nested_bundle_keys(tmp_path, monkeypatch):

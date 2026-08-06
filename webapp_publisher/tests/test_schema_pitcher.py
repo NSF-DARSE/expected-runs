@@ -79,6 +79,24 @@ def test_unlabeled_feature_is_rejected():
         validate_pitcher_bundle(bad)
 
 
+def test_label_identical_to_the_field_name_is_accepted():
+    """Regression: a real run failed here. Some features are already plain
+    English -- "Extension" needs no translation -- so requiring the label to
+    differ from the field name rejected a correct bundle and blocked publish.
+    """
+    good = copy.deepcopy(GOOD)
+    good["model_artifacts.json"]["featureOrder"] = ["Extension"]
+    good["model_artifacts.json"]["labels"] = {"Extension": "Extension"}
+    validate_pitcher_bundle(good)   # must not raise
+
+
+def test_empty_label_is_rejected():
+    bad = copy.deepcopy(GOOD)
+    bad["model_artifacts.json"]["labels"] = {"SpinRate": "   "}
+    with pytest.raises(ValueError, match="no plain-English label"):
+        validate_pitcher_bundle(bad)
+
+
 def test_out_of_range_percentile_is_rejected():
     """A percentile outside 0-100 means the reference population was wrong,
     which would put a nonsense rank in front of a coach.

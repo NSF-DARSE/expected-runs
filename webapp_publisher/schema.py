@@ -36,7 +36,12 @@ def validate_pitcher_bundle(files: dict) -> None:
     order = model["featureOrder"]
     n_feats = len(order)
     for feat in order:
-        if model.get("labels", {}).get(feat) in (None, feat):
+        label = model.get("labels", {}).get(feat)
+        # Presence and non-emptiness only. Do NOT require label != feat: some
+        # features are already plain English ("Extension"), and requiring a
+        # difference rejects a correct bundle. build_pitcher_bundle owns the
+        # label map and raises when an entry is genuinely absent.
+        if not isinstance(label, str) or not label.strip():
             raise ValueError(f"feature {feat} has no plain-English label")
     for tname, m in model["byPitchType"].items():
         for key in ("coef", "scalerMean", "scalerScale", "populationMeanZ"):

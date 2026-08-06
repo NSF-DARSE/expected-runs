@@ -93,8 +93,17 @@ caching stands; no pagination and no combined-file fallback needed.
 
 ## Constraint checks on real output
 
-- Every four-seam arsenal row carries a numeric Location+; no secondary type carries one. Zero
-  violations across 18 pitchers.
+- Every four-seam arsenal row carries a Location+ on the 100 ± 15 display scale, agreeing with the
+  Staff Board to within rounding (max absolute difference 0.057, mean +0.004 across 18 pitchers).
+  No secondary type carries one, and the model artifact's `displayLocMu`/`displayLocSd` are `None`
+  for every non-four-seam type.
+
+  **This check originally passed while the data was wrong.** The first version of it asserted only
+  that the value was numeric, and it was: the page was emitting the raw expected-run value
+  (`-0.006102` where the board showed `110.9`), unscaled and with reversed polarity, so a better
+  locator had the *smaller* number. The final whole-branch review caught it. Numeric-ness was never
+  the property worth testing; agreement with the published scale was. The check above, and the
+  schema's plausible-range band, now test that instead.
 - `percentiles` and `typical` are length 12 on every row, matching `featureOrder`.
 - The manifest's pitcher index is keyed by TrackMan `PitcherId` (stable across seasons), not by the
   staff board's positional id.
@@ -103,7 +112,7 @@ caching stands; no pagination and no combined-file fallback needed.
 
 ## What the real run caught that nothing else did
 
-One bug, and it had survived three review passes and 116 unit tests.
+Two bugs. The first had survived three review passes and 116 unit tests.
 
 `schema.py`'s `validate_pitcher_bundle` rejected any feature label identical to its field name,
 treating that as proof of a missing label. But `Extension`'s correct plain-English label **is**
@@ -119,10 +128,18 @@ It survived review because the test fixture's only feature was `SpinRate`, whose
 the label to be present and non-empty and dropping the identity requirement; enforcing that a
 label exists for every feature stays with `build_pitcher_bundle`, which owns the label map.
 
+The second was worse, and only the final whole-branch review found it: the arsenal row's `loc` was
+the raw expected-run value rather than Location+ on the display scale. See the constraint-check
+section above. Every fixture in the plan hardcoded a plausible-looking `103.0`, so no test ever
+compared the emitted value against the scale it was supposed to be on.
+
 The general lesson matches the script-13 experience recorded in `component_model/analysis/METHODS.md`:
-tests written from the same document as the code inherit that document's blind spots. Two earlier
-defects in this plan had the same character — both sat in the seam between two components rather
-than inside either one, and both were caught by review or real data rather than by tests.
+tests written from the same document as the code inherit that document's blind spots. All four
+defects found in this plan share a shape. Each sat in the seam between two components rather than
+inside either one, each was authored in the plan rather than introduced by an implementer, and none
+was caught by a test — they surfaced through per-task review, the final whole-branch review, or a
+real run. Where a fixture encoded the intended value instead of exercising the path that produces
+it, the test confirmed the intent and missed the behavior.
 
 ## Deferred, not blocking
 

@@ -64,8 +64,16 @@ def validate_pitcher_bundle(files: dict) -> None:
                 raise ValueError(f"{key} arsenal row missing {missing}")
             if a["type"] != "FF" and a["loc"] is not None:
                 raise ValueError(f"{key} emits Location+ for {a['type']}; it is a fastball score only")
-            if a["type"] == "FF" and not isinstance(a["loc"], (int, float)):
-                raise ValueError(f"{key} is missing a numeric Location+ for its fastball")
+            if a["type"] == "FF":
+                if not isinstance(a["loc"], (int, float)):
+                    raise ValueError(f"{key} is missing a numeric Location+ for its fastball")
+                # A raw expected-run value (~0.00x) or an un-negated score would land far
+                # outside this band. Bare numeric-ness is what let exactly that ship once.
+                if not 40.0 <= a["loc"] <= 160.0:
+                    raise ValueError(
+                        f"{key} fastball Location+ is {a['loc']}, outside the plausible "
+                        f"40-160 display range; it is probably not on the 100+/-15 scale"
+                    )
             for arr in ("typical", "percentiles"):
                 if len(a[arr]) != n_feats:
                     raise ValueError(f"{key} arsenal {arr} feature array is {len(a[arr])}, expected {n_feats}")

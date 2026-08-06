@@ -62,6 +62,17 @@ def test_fastball_missing_its_location_score_is_rejected():
         validate_pitcher_bundle(bad)
 
 
+def test_raw_run_value_location_score_is_rejected():
+    """Regression: `loc` shipped once as the bare mean expected-run value (~0.00x,
+    lower = better) instead of the negated 100 +/- 15 display score. Numeric-ness
+    alone accepted it, so the range is what has to catch it.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["arsenal"][0]["loc"] = 0.0042
+    with pytest.raises(ValueError, match="outside the plausible"):
+        validate_pitcher_bundle(bad)
+
+
 def test_feature_array_length_mismatch_is_rejected():
     """Feature arrays are positional against featureOrder; a length mismatch
     would mislabel every trait rather than fail visibly.

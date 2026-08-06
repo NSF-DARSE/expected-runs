@@ -71,7 +71,12 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
                 "usage": float(len(sub) / graded_total),
                 "stuff": float(ar.to_display(sub["ridge_pred"].mean(), mu, sd)),
                 # Location+ is a fastball score only -- never emit it elsewhere.
-                "loc": float(sub["loc"].mean()) if tname == "FF" else None,
+                # It routes through to_display like every other display number, so
+                # the raw run value (lower = better) is scaled and negated exactly
+                # once. Emitting sub["loc"].mean() directly shipped a ~0.00x run
+                # value with reversed polarity onto a 100 +/- 15 page.
+                "loc": (float(ar.to_display(sub["loc"].mean(), state["loc_mu"], state["loc_sd"]))
+                        if tname == "FF" else None),
                 "recentChange": change,
                 "aboveFloor": bool(len(sub) >= floor_n),
                 "typical": [float(v) for v in sub[feats].mean().values],
@@ -114,6 +119,10 @@ def build_model_artifact(fitted_by_type: dict, feats: list[str]) -> dict:
                 "populationMeanZ": [float(v) for v in s["population_mean_z"]],
                 "displayMu": float(s["mu"]),
                 "displaySd": float(s["sd"]),
+                # Location+ display moments, four-seam only. None elsewhere so the
+                # per-type artifact keeps a uniform shape.
+                "displayLocMu": s.get("loc_mu"),
+                "displayLocSd": s.get("loc_sd"),
                 "sampleFloor": SAMPLE_FLOOR,
                 "nQualified": s["n_qualified"],
             }
@@ -131,7 +140,10 @@ def build_grids(pit: pd.DataFrame) -> dict:
     """
     train = pit[pit["PlateLocSide"].notna() & pit["PlateLocHeight"].notna()].copy()
     fc.add_loc_bins(train)
-    train = train[(train["year"] == 2024) & train["xT"].notna()]
+    # Earlier-season rows, expressed the same way attach_location expresses it.
+    # load_pitches relabels the year pair to 2024/2025 roles, so "!= 2025" and
+    # "== 2024" select identical rows today; the asymmetry was the hazard.
+    train = train[(train["year"] != SEASON_ROLE_YEAR) & train["xT"].notna()]
     pooled = fc.PooledLocationMap(train)
     cmap = fc.CountLocationMap(train, "count12", 5)
     xs = np.arange(-1.25, 1.25, 0.25)
@@ -152,7 +164,8 @@ def build_grids(pit: pd.DataFrame) -> dict:
     return out
 
 
-def attach_location(pit: pd.DataFrame, state: dict, tags, fc_module, season_year: int) -> None:
+def attach_location(pit: pd.DataFrame, state: dict, tags, fc_module, season_year: int,
+                    floor_n: int = SAMPLE_FLOOR) -> None:
     """Attach Location+ run values to a fitted type's graded-season pitches.
 
     Only four-seams get a value; Location+ is a fastball score, and secondary-pitch
@@ -162,10 +175,20 @@ def attach_location(pit: pd.DataFrame, state: dict, tags, fc_module, season_year
     FULL frame, then applied to the graded season. state["pitches"] holds only the
     graded season, so training off it selects zero rows and yields an all-NaN map --
     which is how this silently produced null Location+ for fastballs before.
+
+    Also derives that type's Location+ DISPLAY MOMENTS from the qualifying
+    population and stores them on state, so build_pitcher_records can route the
+    raw run value through arsenal.to_display instead of emitting it bare. These
+    are the same qualified-population moments 08_staff_scores.py uses for Loc100
+    (its `n_ff >= 100` is this module's SAMPLE_FLOOR).
+
+    floor_n is a parameter rather than the module constant only so tests can drive
+    this on small synthetic frames; production passes SAMPLE_FLOOR.
     """
     season = state["pitches"]
     if tags is not None:
         season["loc"] = np.nan
+        state["loc_mu"] = state["loc_sd"] = None
         return
     ff_all = pit[ar.type_mask(pit, tags)].copy()
     ff_all = ff_all[ff_all["PlateLocSide"].notna() & ff_all["PlateLocHeight"].notna()]
@@ -180,6 +203,12 @@ def attach_location(pit: pd.DataFrame, state: dict, tags, fc_module, season_year
     season["loc"] = fc_module.PooledLocationMap(train).apply(season)
     if season["loc"].isna().all():
         raise ValueError("location map produced all-NaN values for four-seams")
+
+    per_pitcher = season.groupby("PitcherId")["loc"].agg(["size", "mean"])
+    loc_mu, loc_sd = ar.display_scale(
+        per_pitcher["mean"].values, (per_pitcher["size"] >= floor_n).values
+    )
+    state["loc_mu"], state["loc_sd"] = loc_mu, loc_sd
 
 
 def main() -> int:

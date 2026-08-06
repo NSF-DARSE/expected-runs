@@ -118,6 +118,55 @@ def test_out_of_range_percentile_is_rejected():
         validate_pitcher_bundle(bad)
 
 
+def test_raw_run_value_stuff_score_is_rejected():
+    """Regression guard mirroring the loc bug: `stuff` sits on the same
+    100+/-15 display scale and is just as exposed to a raw expected-run value
+    (~0.00x, lower = better) shipping unscaled.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["arsenal"][0]["stuff"] = -0.0231
+    with pytest.raises(ValueError, match="Stuff"):
+        validate_pitcher_bundle(bad)
+
+
+def test_raw_run_value_pitch_grade_is_rejected():
+    """Same failure mode as the stuff regression above, but for the per-pitch
+    grade `g`.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["pitches"][0]["g"] = 0.0038
+    with pytest.raises(ValueError, match="pitch grade"):
+        validate_pitcher_bundle(bad)
+
+
+def test_pitch_grade_at_measured_real_spread_edges_is_accepted():
+    """Regression against a band tight enough to break a real publish:
+    per-pitch four-seam grades measured on a real bundle range ~20-147 with
+    per-pitcher standard deviations of 8.9-16.0, well outside DISPLAY_BAND.
+    Both edges of that measured range must pass.
+    """
+    good_low = copy.deepcopy(GOOD)
+    good_low["pitchers/1000123.json"]["pitches"][0]["g"] = 20.0
+    validate_pitcher_bundle(good_low)  # must not raise
+
+    good_high = copy.deepcopy(GOOD)
+    good_high["pitchers/1000123.json"]["pitches"][0]["g"] = 147.0
+    validate_pitcher_bundle(good_high)  # must not raise
+
+
+def test_arsenal_pitch_type_missing_from_model_artifacts_is_rejected():
+    """The frontend treats a byPitchType entry for every arsenal type as an
+    unstated precondition (missing artifact reads a sample floor as 0 and a
+    tooltip as "Fewer than 0 pitches this season"). Today it holds by
+    construction; this checks it.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["arsenal"][0]["type"] = "SL"
+    bad["pitchers/1000123.json"]["arsenal"][0]["loc"] = None
+    with pytest.raises(ValueError, match="SL"):
+        validate_pitcher_bundle(bad)
+
+
 def test_non_positive_display_sd_is_rejected():
     """A zero or negative display sd means the scale is degenerate; every score
     derived from it would be garbage or a division error.

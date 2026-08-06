@@ -23,6 +23,38 @@ REQUIRED_ARSENAL_KEYS = {"type", "label", "n", "usage", "stuff", "loc",
                          "recentChange", "aboveFloor", "typical", "percentiles"}
 REQUIRED_PITCH_KEYS = {"d", "t", "x", "z", "c", "g", "f"}
 
+# Plausible-range guard for scores on the 100+/-15 display scale. A raw
+# expected-run value (~0.00x, lower = better) or an un-negated score shipped
+# once as `loc`, unscaled and with reversed polarity, and bare numeric-ness
+# was what let it through. `stuff` (every arsenal row) and `g` (every pitch
+# row) sit on the same display scale and are just as exposed to that failure
+# mode, so they get the same kind of guard.
+#
+# Season/pitcher-aggregate scores (loc, stuff) use this tighter band.
+DISPLAY_BAND = (40.0, 160.0)
+# Per-pitch grades (g) spread wider than season aggregates: measured on a real
+# bundle, four-seam per-pitch g ranges ~20-147 with per-pitcher standard
+# deviations of 8.9-16.0. DISPLAY_BAND would reject legitimate real data at
+# either edge, so PITCH_GRADE_BAND is deliberately wider -- comfortably
+# admitting the measured 20-147 range while still well outside reach of a raw
+# run value (~0.00x).
+PITCH_GRADE_BAND = (10.0, 190.0)
+
+
+def _check_display_band(value, band, *, key, field, ptype):
+    """Raise if `value` (a score on the 100+/-15 display scale) falls outside
+    `band`. Callers pass a file key, a field description, and the pitch type
+    so the message can name all three plus the offending value.
+    """
+    low, high = band
+    if not isinstance(value, (int, float)):
+        raise ValueError(f"{key} {field} for {ptype} is not numeric: {value!r}")
+    if not low <= value <= high:
+        raise ValueError(
+            f"{key} {field} for {ptype} is {value}, outside the plausible "
+            f"{low:g}-{high:g} display range; it is probably not on the 100+/-15 scale"
+        )
+
 
 def validate_pitcher_bundle(files: dict) -> None:
     """Fail loudly before upload. Mirrors validate_bundle's style: plain
@@ -67,13 +99,13 @@ def validate_pitcher_bundle(files: dict) -> None:
             if a["type"] == "FF":
                 if not isinstance(a["loc"], (int, float)):
                     raise ValueError(f"{key} is missing a numeric Location+ for its fastball")
-                # A raw expected-run value (~0.00x) or an un-negated score would land far
-                # outside this band. Bare numeric-ness is what let exactly that ship once.
-                if not 40.0 <= a["loc"] <= 160.0:
-                    raise ValueError(
-                        f"{key} fastball Location+ is {a['loc']}, outside the plausible "
-                        f"40-160 display range; it is probably not on the 100+/-15 scale"
-                    )
+                _check_display_band(a["loc"], DISPLAY_BAND, key=key, field="fastball Location+", ptype=a["type"])
+            _check_display_band(a["stuff"], DISPLAY_BAND, key=key, field="arsenal Stuff+", ptype=a["type"])
+            if a["type"] not in model["byPitchType"]:
+                raise ValueError(
+                    f"{key} arsenal has pitch type {a['type']!r} with no matching entry "
+                    f"in model_artifacts.json byPitchType"
+                )
             for arr in ("typical", "percentiles"):
                 if len(a[arr]) != n_feats:
                     raise ValueError(f"{key} arsenal {arr} feature array is {len(a[arr])}, expected {n_feats}")
@@ -85,3 +117,4 @@ def validate_pitcher_bundle(files: dict) -> None:
                 raise ValueError(f"{key} pitch row missing {missing}")
             if len(p["f"]) != n_feats:
                 raise ValueError(f"{key} pitch feature array is {len(p['f'])}, expected {n_feats}")
+            _check_display_band(p["g"], PITCH_GRADE_BAND, key=key, field="pitch grade (g)", ptype=p["t"])

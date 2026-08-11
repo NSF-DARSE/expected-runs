@@ -218,6 +218,12 @@ bundle/
 # ...except the checked-in test fixture, which is synthetic, not licensed data.
 !webapp_publisher/tests/fixtures/staff_scores.json
 
+# Screenshots and browser-automation dumps of the pitching app. These render
+# real pitcher names, which are Level II, and they accumulate untracked in the
+# repo root where a single `git add .` would publish them.
+*.png
+.playwright-mcp/
+
 # UD Athletics additions
 *.key
 *.pem

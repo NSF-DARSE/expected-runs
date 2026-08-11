@@ -218,6 +218,11 @@ bundle/
 # ...except the checked-in test fixture, which is synthetic, not licensed data.
 !webapp_publisher/tests/fixtures/staff_scores.json
 
+# Raw TrackMan API pulls: the licensed pitch-by-pitch CSVs, the bat-tracking
+# JSON, and the positioning files, ~27k of them sitting untracked and, until
+# this line, unignored. This is the source data the whole license covers.
+trackman_api/
+
 # Screenshots and browser-automation dumps of the pitching app. These render
 # real pitcher names, which are Level II, and they accumulate untracked in the
 # repo root where a single `git add .` would publish them.

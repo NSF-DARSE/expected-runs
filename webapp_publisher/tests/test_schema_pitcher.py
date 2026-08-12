@@ -16,7 +16,8 @@ GOOD = {
         "pitcherId": 1000123, "name": "Test-Pitcher, Alpha", "hand": "R", "season": 2026,
         "arsenal": [{"type": "FF", "label": "Fastball", "n": 412, "usage": 1.0,
                      "stuff": 124.0, "loc": 103.0, "recentChange": -6.2,
-                     "aboveFloor": True, "typical": [2350.0], "percentiles": [78]}],
+                     "avgVelo": 93.1, "aboveFloor": True,
+                     "typical": [2350.0], "percentiles": [78]}],
         "outings": [{"date": "2026-03-15", "type": "FF", "n": 42, "stuff": 118.0}],
         "pitches": [{"d": "2026-03-15", "t": "FF", "x": -0.42, "z": 2.31,
                      "c": "0-2", "g": 131.0, "f": [2350.0]}],
@@ -185,6 +186,48 @@ def test_arsenal_pitch_type_missing_from_model_artifacts_is_rejected():
     bad["pitchers/1000123.json"]["arsenal"][0]["loc"] = None
     with pytest.raises(ValueError, match="SL"):
         validate_pitcher_bundle(bad)
+
+
+def test_missing_average_velocity_is_rejected():
+    """avgVelo is required rather than optional. It is the pitch type's own
+    context line, so a row without it renders a pitch with no velocity beside it
+    and nothing anywhere says the field went missing.
+    """
+    bad = copy.deepcopy(GOOD)
+    del bad["pitchers/1000123.json"]["arsenal"][0]["avgVelo"]
+    with pytest.raises(ValueError, match="avgVelo"):
+        validate_pitcher_bundle(bad)
+
+
+def test_average_velocity_in_wrong_units_is_rejected():
+    """The failure this band exists for: RelSpeed arriving in m/s. A 93.1 mph
+    fastball reads 41.6, which is numeric, positive, and completely wrong on a
+    page a coach reads in mph.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["arsenal"][0]["avgVelo"] = 41.6
+    with pytest.raises(ValueError, match="mph"):
+        validate_pitcher_bundle(bad)
+
+
+def test_nan_average_velocity_is_rejected():
+    """A mean over an all-null RelSpeed slice is NaN, which passes every range
+    comparison by failing all of them, and would reach the page as "NaN mph".
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["arsenal"][0]["avgVelo"] = float("nan")
+    with pytest.raises(ValueError, match="NaN"):
+        validate_pitcher_bundle(bad)
+
+
+def test_average_velocity_across_the_real_college_range_is_accepted():
+    """The band is a units check, not a quality check. A soft changeup and a
+    plus fastball must both publish.
+    """
+    for velo in (68.0, 98.0):
+        good = copy.deepcopy(GOOD)
+        good["pitchers/1000123.json"]["arsenal"][0]["avgVelo"] = velo
+        validate_pitcher_bundle(good)  # must not raise
 
 
 def test_non_positive_display_sd_is_rejected():

@@ -78,6 +78,13 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
                 "loc": (float(ar.to_display(sub["loc"].mean(), state["loc_mu"], state["loc_sd"]))
                         if tname == "FF" else None),
                 "recentChange": change,
+                # Real release velocity, as context beside the pitch type -- not a
+                # grade and not a trait. No ridge coefficient touches RelSpeed (the
+                # model sees EffectiveVelo and a differential whose level cancels),
+                # so this can never carry a percentile or a Worth column. It is the
+                # mean over the same graded pitches that produce "n" and "stuff", so
+                # the number a coach reads always describes the sample beside it.
+                "avgVelo": float(sub["RelSpeed"].mean()),
                 "aboveFloor": bool(len(sub) >= floor_n),
                 "typical": [float(v) for v in sub[feats].mean().values],
                 # Percentile of each of his typical trait values against the

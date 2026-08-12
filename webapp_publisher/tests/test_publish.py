@@ -130,7 +130,8 @@ def test_dry_run_writes_nested_bundle_keys(tmp_path, monkeypatch):
         "pitchers": [{
             "pitcherId": 1000123, "name": "Test-Pitcher, Alpha", "hand": "R",
             "arsenal": [{"type": "FF", "n": 412, "usage": 1.0, "stuff": 124.0,
-                         "loc": 103.0, "recentChange": -6.2, "aboveFloor": True,
+                         "loc": 103.0, "recentChange": -6.2, "avgVelo": 93.1,
+                         "aboveFloor": True,
                          "typical": [2350.0], "percentiles": [78]}],
             "outings": [{"date": "2026-03-15", "type": "FF", "n": 42, "stuff": 118.0}],
             "pitches": [{"d": "2026-03-15", "t": "FF", "x": -0.42, "z": 2.31,

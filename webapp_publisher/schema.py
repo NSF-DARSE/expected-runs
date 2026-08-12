@@ -20,7 +20,7 @@ def validate_bundle(bundle: dict) -> None:
 
 
 REQUIRED_ARSENAL_KEYS = {"type", "label", "n", "usage", "stuff", "loc",
-                         "recentChange", "aboveFloor", "typical", "percentiles"}
+                         "recentChange", "avgVelo", "aboveFloor", "typical", "percentiles"}
 REQUIRED_PITCH_KEYS = {"d", "t", "x", "z", "c", "g", "f"}
 
 # Plausible-range guard for scores on the 100+/-15 display scale. A raw
@@ -48,6 +48,14 @@ DISPLAY_BAND = (40.0, 160.0)
 # pitch on some other staff would abort a publish for no diagnostic gain.
 PITCH_GRADE_BAND = (1.0, 250.0)
 
+# avgVelo is the one number on the page in real units rather than on the display
+# scale, so the band is a units check, not a quality check. A mean RelSpeed that
+# lands outside this is a join that dropped rows, a NaN mean, or someone handing
+# it m/s (a 93 mph fastball reads 41.6). College arms sit roughly 68-98; the band
+# is wide enough that no real pitch aborts a publish and narrow enough that none
+# of those three failures survives it.
+VELO_BAND = (55.0, 110.0)
+
 
 def _check_display_band(value, band, *, key, field, ptype):
     """Raise if `value` (a score on the 100+/-15 display scale) falls outside
@@ -61,6 +69,24 @@ def _check_display_band(value, band, *, key, field, ptype):
         raise ValueError(
             f"{key} {field} for {ptype} is {value}, outside the plausible "
             f"{low:g}-{high:g} display range; it is probably not on the 100+/-15 scale"
+        )
+
+
+def _check_velo(value, *, key, ptype):
+    """Raise if `value` is not a plausible average release speed in mph. NaN is
+    called out separately: a mean over an empty or all-null RelSpeed slice comes
+    back NaN, which fails every comparison silently and would otherwise reach the
+    page as "NaN mph".
+    """
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise ValueError(f"{key} avgVelo for {ptype} is not numeric: {value!r}")
+    if value != value:
+        raise ValueError(f"{key} avgVelo for {ptype} is NaN; RelSpeed is missing for that slice")
+    low, high = VELO_BAND
+    if not low <= value <= high:
+        raise ValueError(
+            f"{key} avgVelo for {ptype} is {value}, outside the plausible "
+            f"{low:g}-{high:g} mph range; check units and the RelSpeed join"
         )
 
 
@@ -109,6 +135,7 @@ def validate_pitcher_bundle(files: dict) -> None:
                     raise ValueError(f"{key} is missing a numeric Location+ for its fastball")
                 _check_display_band(a["loc"], DISPLAY_BAND, key=key, field="fastball Location+", ptype=a["type"])
             _check_display_band(a["stuff"], DISPLAY_BAND, key=key, field="arsenal Stuff+", ptype=a["type"])
+            _check_velo(a["avgVelo"], key=key, ptype=a["type"])
             if a["type"] not in model["byPitchType"]:
                 raise ValueError(
                     f"{key} arsenal has pitch type {a['type']!r} with no matching entry "

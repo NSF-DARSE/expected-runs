@@ -46,6 +46,9 @@ def _fitted():
         # Raw location run values, pitcher's perspective (lower = better).
         # Pitcher 1 locates better than pitcher 2.
         "loc": [-0.01] * 3 + [0.01] * 3,
+        # Real release speed. Deliberately not in `feats`: it carries no ridge
+        # coefficient and exists only as context beside the pitch type.
+        "RelSpeed": [93.0, 94.0, 92.0, 88.0, 89.0, 87.0],
     })
     for f in feats:
         pitches[f] = rng.normal(0, 1, n)
@@ -82,6 +85,34 @@ def test_pitch_grades_average_to_the_arsenal_row_grade():
         row = r["arsenal"][0]
         grades = [p["g"] for p in r["pitches"] if p["t"] == "FF"]
         assert np.mean(grades) == pytest.approx(row["stuff"], abs=1e-9)
+
+
+def test_average_velocity_covers_the_same_pitches_as_the_row_grade():
+    """avgVelo is the mean over the graded pitches, the ones counted by `n`.
+
+    The alternative was a season-wide mean including ungraded pitches, which
+    would put a velocity next to a count it does not describe. Pitcher 1 throws
+    93/94/92 and pitcher 2 throws 88/89/87 in the fixture.
+    """
+    mod = _load_pages_module()
+    feats, fitted = _fitted()
+    records = mod.build_pitcher_records({"FF": fitted}, feats, floor_n=1, asof="2026-03-10",
+                                        min_type_pitches=1)
+    by_id = {r["pitcherId"]: r["arsenal"][0] for r in records}
+    assert by_id[1]["avgVelo"] == pytest.approx(93.0)
+    assert by_id[2]["avgVelo"] == pytest.approx(88.0)
+    for row in by_id.values():
+        assert row["n"] == 3
+
+
+def test_average_velocity_is_not_a_graded_trait():
+    """The constraint that makes velo context rather than a trait row: nothing in
+    the model sees RelSpeed, so there is no coefficient to rank it against. If it
+    ever enters `feats`, it acquires a percentile and a Worth column and quietly
+    becomes a second Stuff+ input, which is the construct leak this avoids.
+    """
+    feats, _ = _fitted()
+    assert "RelSpeed" not in feats
 
 
 def test_secondary_types_never_carry_a_location_score():

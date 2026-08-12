@@ -52,7 +52,7 @@ USECOLS = ["PitchUID", "Date", "Pitcher", "PitcherId", "PitcherThrows", "Pitcher
            "Batter", "BatterSide", "BatterTeam", "Balls", "Strikes",
            "TaggedPitchType", "PitchCall", "TaggedHitType", "ExitSpeed", "Angle",
            "Target", "SpinRate", "Extension", "HorzBreak", "InducedVertBreak",
-           "EffectiveVelo", "RelHeight", "RelSide", "vertbreakdiff", "horzbreakdiff",
+           "EffectiveVelo", "RelSpeed", "RelHeight", "RelSide", "vertbreakdiff", "horzbreakdiff",
            "velocity_differential", "PlateLocSide", "PlateLocHeight", "League",
            "Level", "GameID", "Inning", "Top/Bottom", "PAofInning", "PitchofPA"]
 
@@ -108,7 +108,14 @@ def load_pitches(args):
     pair = getattr(args, "year_pair", (2024, 2025))
     cache = os.path.join(args.workdir, f"pitches_cache{_year_suffix(args)}.parquet")
     if os.path.exists(cache):
-        return pd.read_parquet(cache)
+        cached = pd.read_parquet(cache)
+        stale = [c for c in USECOLS if c not in cached.columns]
+        if not stale:
+            return cached
+        # A cache written before a column joined USECOLS would otherwise serve a
+        # frame silently missing it, and the miss surfaces as an empty display
+        # value rather than an error. Rebuild instead of trusting the file.
+        print(f"*** CACHE REBUILD: {cache} predates {', '.join(stale)} ***")
     df = pd.read_csv(args.data, usecols=USECOLS)
     df = df.dropna(subset=["PitchUID"]).drop_duplicates(subset="PitchUID", keep="first")
     df["year"] = pd.to_datetime(df["Date"], errors="coerce").dt.year

@@ -105,6 +105,20 @@ def test_average_velocity_covers_the_same_pitches_as_the_row_grade():
         assert row["n"] == 3
 
 
+def test_an_extract_without_relspeed_fails_with_the_fix_in_the_message():
+    """The real source extract is a trimmed subset of the pipeline's output and
+    the trim in use through 2026-08 drops RelSpeed, so this is the state of the
+    data on disk today, not a hypothetical. A bare KeyError from a mean() deep in
+    the loop does not tell anyone the extract is the problem.
+    """
+    mod = _load_pages_module()
+    feats, fitted = _fitted()
+    fitted["pitches"] = fitted["pitches"].drop(columns=["RelSpeed"])
+    with pytest.raises(KeyError, match="Regenerate the extract"):
+        mod.build_pitcher_records({"FF": fitted}, feats, floor_n=1, asof="2026-03-10",
+                                  min_type_pitches=1)
+
+
 def test_average_velocity_is_not_a_graded_trait():
     """The constraint that makes velo context rather than a trait row: nothing in
     the model sees RelSpeed, so there is no coefficient to rank it against. If it

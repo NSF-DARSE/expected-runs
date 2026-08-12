@@ -61,6 +61,17 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
         name = str(included[0][2]["Pitcher"].iloc[0])
         hand = str(included[0][2]["PitcherThrows"].iloc[0])[0]
         for tname, state, sub in included:
+            if "RelSpeed" not in sub.columns:
+                # The extract fed to the scorer is a trimmed subset of the
+                # pipeline's output, and the trim in use through 2026-08 drops
+                # RelSpeed. Say so here rather than letting a KeyError surface
+                # from a mean() three frames down.
+                raise KeyError(
+                    "RelSpeed is missing from the source extract, so the arsenal "
+                    "rows cannot carry real velocity. Regenerate the extract from "
+                    "python_files/target_and_calculated_pipeline.py, which emits "
+                    "RelSpeed, and delete the pitches_cache parquet in the workdir."
+                )
             mu, sd = state["mu"], state["sd"]
             per_outing = ar.outing_table(sub, mu, sd)
             change = ar.recent_change(per_outing, floor_n=floor_n, asof=asof)

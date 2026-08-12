@@ -52,9 +52,18 @@ USECOLS = ["PitchUID", "Date", "Pitcher", "PitcherId", "PitcherThrows", "Pitcher
            "Batter", "BatterSide", "BatterTeam", "Balls", "Strikes",
            "TaggedPitchType", "PitchCall", "TaggedHitType", "ExitSpeed", "Angle",
            "Target", "SpinRate", "Extension", "HorzBreak", "InducedVertBreak",
-           "EffectiveVelo", "RelSpeed", "RelHeight", "RelSide", "vertbreakdiff", "horzbreakdiff",
+           "EffectiveVelo", "RelHeight", "RelSide", "vertbreakdiff", "horzbreakdiff",
            "velocity_differential", "PlateLocSide", "PlateLocHeight", "League",
            "Level", "GameID", "Inning", "Top/Bottom", "PAofInning", "PitchofPA"]
+
+# Columns read when the extract has them and skipped when it does not. RelSpeed
+# is real release velocity: no model feature uses it (the ridge sees
+# EffectiveVelo and a differential whose level cancels), and it is display
+# context on the pitcher page only. It is optional because the extract the
+# scorer consumes is a trimmed subset of the pipeline's output, and the trim in
+# use through 2026-08 drops it. Requiring it here would make a source CSV that
+# every other script reads fine fail to load at all.
+OPTIONAL_COLS = ["RelSpeed"]
 
 RIDGE_ALPHA = 10
 BATTER_K = 200
@@ -107,16 +116,18 @@ def load_pitches(args):
     """
     pair = getattr(args, "year_pair", (2024, 2025))
     cache = os.path.join(args.workdir, f"pitches_cache{_year_suffix(args)}.parquet")
+    header = pd.read_csv(args.data, nrows=0).columns
+    available = USECOLS + [c for c in OPTIONAL_COLS if c in header]
     if os.path.exists(cache):
         cached = pd.read_parquet(cache)
-        stale = [c for c in USECOLS if c not in cached.columns]
+        stale = [c for c in available if c not in cached.columns]
         if not stale:
             return cached
-        # A cache written before a column joined USECOLS would otherwise serve a
+        # A cache written before a column joined the read would otherwise serve a
         # frame silently missing it, and the miss surfaces as an empty display
         # value rather than an error. Rebuild instead of trusting the file.
         print(f"*** CACHE REBUILD: {cache} predates {', '.join(stale)} ***")
-    df = pd.read_csv(args.data, usecols=USECOLS)
+    df = pd.read_csv(args.data, usecols=available)
     df = df.dropna(subset=["PitchUID"]).drop_duplicates(subset="PitchUID", keep="first")
     df["year"] = pd.to_datetime(df["Date"], errors="coerce").dt.year
     df = df[df["year"].isin(pair)].copy()

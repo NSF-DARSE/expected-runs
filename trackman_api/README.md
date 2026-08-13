@@ -22,10 +22,33 @@ Drive CSV folder. Two slices so far:
    Target stage (physics float dust < 1e-6 relative; one documented
    provenance diff on RunsRemaining, see `golden_diff.py` docstring).
 
-Remaining before production cutover: full 2024-2025 backfill (~11.7k games,
-a long overnight run), a parallel rebuild of the final dataset from the
-backfilled tree, and the script 01 anchor check against the Drive-sourced
-build. Design: `docs/superpowers/specs/2026-07-21-trackman-api-slice-design.md`.
+4. **Season pull** (`pull.py`) — the season-scale version of the backfill:
+   same game-date layout and same bounded retry, plus a thread pool (the data
+   GETs, not discovery, are the bottleneck), an overall wall-clock deadline
+   that exits non-zero rather than stalling, and atomic overwrite under
+   `--force`. Use this for a season; `backfill.py` remains the
+   `--refresh`/incremental entry point.
+5. **Extract rebuild** (`rebuild_extract.py`) — walks the game-date tree,
+   concatenates the raw columns of the hand-assembled extract, and diffs the
+   two on row counts, date coverage, RelSpeed coverage, and game/pitch/pitcher
+   overlap.
+
+## Folder convention: game date, not fetch date
+
+Both `pull.py` and `backfill.py` write `<base>/YYYY/MM/DD/CSV/<gameID>.csv`
+where `YYYY/MM/DD` is the **game's own date**, taken from the gameID prefix.
+A given game therefore always lands on the same path, so re-pulling a date
+overwrites instead of accumulating.
+
+The older tree under `trackman_api/2026/` is a mirror of the Drive folder and
+is keyed by **fetch date**, so the same game can appear under several day
+folders; `Helpers.resolve_latest_game_files` exists to undo that. Keep the two
+trees separate. Do not point a pull at the fetch-date tree and do not migrate
+it; the existing reader keeps working on it as is.
+
+Remaining before production cutover: the 2024 backfill (2025 is pulled), a
+parallel rebuild of the final dataset from the pulled tree, and the script 01
+anchor check against the Drive-sourced build. Design: `docs/superpowers/specs/2026-07-21-trackman-api-slice-design.md`.
 
 ## Setup
 
@@ -88,6 +111,31 @@ game; a full season, all teams, is an overnight job. The discovery endpoint
 has a much stricter rate quota than the data GETs (seemingly per-hour) --
 many-window discovery sweeps in quick succession will 429 even after the
 built-in minutes-scale backoff; wait and re-run.
+
+## Run a season pull
+
+```
+python trackman_api/pull.py --from 2025-01-01 --to 2025-07-06 --out <local dir>
+python trackman_api/pull.py --from ... --to ... --out <dir> --workers 12
+python trackman_api/pull.py --from ... --to ... --out <dir> --dry-run
+python trackman_api/pull.py --from ... --to ... --out <dir> --force   # re-pull
+```
+
+Throughput with 12 workers is roughly 0.7 games/s, so the 2025 season (~6.6k
+games) takes about three hours. `--timeout-hours` (default 12) bounds the whole
+run; hitting it cancels the remaining work and exits non-zero. Interrupted runs
+resume with the same command because existing game files are skipped.
+
+## Run the extract rebuild and diff
+
+```
+python trackman_api/rebuild_extract.py --tree <game-date dir> \
+    --extract <path to the hand-assembled source csv> \
+    --out <rebuilt csv> --year 2025
+```
+
+Prints aggregates only. Both inputs and the output are licensed Level II data
+and must stay on local storage.
 
 ## Run the golden diff
 

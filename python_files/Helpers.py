@@ -1,5 +1,138 @@
+import os
+import re
+
 import pandas as pd
 from collections import defaultdict
+
+
+EXCLUDED_FILE_MARKERS = ("unverified", "playerpositioning")
+
+_GAME_DATE_PREFIX = re.compile(r"^(\d{4})\d{4}")
+
+
+def _is_game_csv(filename):
+    lowered = filename.lower()
+    if not lowered.endswith(".csv"):
+        return False
+    return not any(marker in lowered for marker in EXCLUDED_FILE_MARKERS)
+
+
+def _game_year(filename, folder_year):
+    """Year the game was PLAYED, from the TrackMan filename date prefix.
+
+    Falls back to the folder year when a file does not carry the usual
+    YYYYMMDD- prefix.
+    """
+    match = _GAME_DATE_PREFIX.match(filename)
+    return match.group(1) if match else folder_year
+
+
+def resolve_latest_game_files(data_root, years=None, verbose=False):
+    """Return one path per distinct game CSV, choosing the most recent copy.
+
+    TrackMan API pulls land a game's CSV in the folder for the day it was
+    FETCHED, not the day it was played, so a game that is revised and re-pulled
+    appears in several day folders. In the 2026 tree, 642 of 8,338 game
+    filenames sit in more than one folder, which is 216k duplicate rows out of
+    2.73M, and 413 of those 642 differ in CONTENT between copies. The later copy
+    is the corrected one: observed revisions replace placeholder BatterIds with
+    real ones, fix batter names, flip BatterSide (65 pitches in one game), and
+    change PlayResult. So the earlier copy is not a harmless duplicate, and
+    dropping the *second* occurrence of a PitchUID keeps the stale values.
+
+    Resolving at the file level instead handles the identical copies and the
+    revisions in one step, and it has to span the whole tree rather than a
+    single month: a January game can be re-pulled in March.
+
+    `years` filters on the year the game was played (from the filename date
+    prefix), not on the folder the copy was fetched into, so a 2024 game
+    re-pulled in 2025 still resolves to its corrected copy.
+
+    This does not catch one pitch appearing under two different game FILENAMES,
+    which happens with suspended games: 20260221-RiddlePaceField-1 was first
+    exported as a 178-pitch Feb 22 continuation and later re-issued as the full
+    247-pitch game under its original Feb 21 date, with PitchNo renumbered. The
+    returned order is ascending by fetch date so the caller can resolve that by
+    letting the newest file win.
+    """
+    if not os.path.isdir(data_root):
+        return []
+
+    wanted = {str(year) for year in years} if years is not None else None
+    newest = {}
+
+    for year in sorted(os.listdir(data_root)):
+        year_path = os.path.join(data_root, year)
+        if not (year.isdigit() and os.path.isdir(year_path)):
+            continue
+
+        for month in sorted(os.listdir(year_path)):
+            month_path = os.path.join(year_path, month)
+            if not (month.isdigit() and os.path.isdir(month_path)):
+                continue
+
+            for day in sorted(os.listdir(month_path)):
+                csv_path = os.path.join(month_path, day, "CSV")
+                if not (day.isdigit() and os.path.isdir(csv_path)):
+                    continue
+
+                fetched = (int(year), int(month), int(day))
+
+                for filename in sorted(os.listdir(csv_path)):
+                    if not _is_game_csv(filename):
+                        continue
+                    if wanted is not None and _game_year(filename, year) not in wanted:
+                        continue
+
+                    key = filename.lower()
+                    path = os.path.join(csv_path, filename)
+                    current = newest.get(key)
+                    if current is None or fetched > current[0]:
+                        newest[key] = (fetched, path)
+
+    # Ascending fetch order, so a later pull always lands after an earlier one. The
+    # concatenated build relies on this to let the newer file win any leftover
+    # cross-file PitchUID collision (see the suspended-game case below).
+    resolved = [path for _, path in sorted(newest.values())]
+
+    if verbose:
+        print(
+            f"Resolved {len(resolved)} game files under {data_root}"
+            + (f" for years {sorted(wanted)}" if wanted else "")
+        )
+
+    return resolved
+
+
+def count_superseded_copies(data_root, years=None):
+    """How many game-CSV copies are superseded by a newer pull. Diagnostic only."""
+    if not os.path.isdir(data_root):
+        return 0
+
+    wanted = {str(year) for year in years} if years is not None else None
+    total = 0
+
+    for year in sorted(os.listdir(data_root)):
+        year_path = os.path.join(data_root, year)
+        if not (year.isdigit() and os.path.isdir(year_path)):
+            continue
+        for month in sorted(os.listdir(year_path)):
+            month_path = os.path.join(year_path, month)
+            if not (month.isdigit() and os.path.isdir(month_path)):
+                continue
+            for day in sorted(os.listdir(month_path)):
+                csv_path = os.path.join(month_path, day, "CSV")
+                if not (day.isdigit() and os.path.isdir(csv_path)):
+                    continue
+                for filename in os.listdir(csv_path):
+                    if not _is_game_csv(filename):
+                        continue
+                    if wanted is not None and _game_year(filename, year) not in wanted:
+                        continue
+                    total += 1
+
+    return total - len(resolve_latest_game_files(data_root, years=years))
+
 
 def add_runner_states(df):
     """

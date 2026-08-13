@@ -1,0 +1,31 @@
+{
+  "_comment": "Cross-language attribution fixture. A byte-identical copy lives at ud-athletics-baseball-pitching/src/test/fixtures/attribution_fixture.json. Edit BOTH or the drift this fixture exists to catch goes uncaught. Synthetic 3-feature model; not a real pitch type.",
+  "featureOrder": ["velo", "spin", "extension"],
+  "labels": { "velo": "Velocity", "spin": "Spin rate", "extension": "Extension" },
+  "model": {
+    "coef": [0.01, -0.02, -0.03],
+    "scalerMean": [2200.0, 6.0, 88.0],
+    "scalerScale": [200.0, 0.5, 2.0],
+    "populationMeanZ": [0.0, 0.0, 0.0],
+    "displaySd": 0.05
+  },
+  "cases": [
+    {
+      "name": "pitch type vs population mean",
+      "featureValues": [2400.0, 6.5, 90.0],
+      "baselineZ": [0.0, 0.0, 0.0],
+      "expectedZ": [1.0, 1.0, 1.0],
+      "expectedContributions": [-3.0, 6.0, 9.0],
+      "expectedSum": 12.0
+    },
+    {
+      "name": "one pitch vs his own typical pitch",
+      "featureValues": [2400.0, 6.5, 90.0],
+      "typicalValues": [2300.0, 6.2, 89.0],
+      "baselineZ": [0.5, 0.4, 0.5],
+      "expectedZ": [1.0, 1.0, 1.0],
+      "expectedContributions": [-1.5, 3.6, 4.5],
+      "expectedSum": 6.6
+    }
+  ]
+}

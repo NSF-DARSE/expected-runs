@@ -1,9 +1,17 @@
+import argparse
 import os
-import calendar
+import sys
+from collections import defaultdict
 from datetime import datetime
 
 import pandas as pd
-from Helpers import add_runner_states, add_game_state, add_runs_remaining
+from Helpers import (
+    add_runner_states,
+    add_game_state,
+    add_runs_remaining,
+    count_superseded_copies,
+    resolve_latest_game_files,
+)
 
 
 # Final schema (same list you already use)
@@ -31,79 +39,66 @@ def load_gamestate_to_er(summary_path):
     return dict(zip(df["GameState"], df["ExpectedRuns"]))
 
 
-def generate_target_for_month(base_path, year, month, summary_path):
+def generate_target_for_game_file(file_path, gamestate_to_er):
+    """Build the target-integrated frame for one game CSV, or None if unusable."""
+    df = pd.read_csv(file_path)
+
+    if df.empty or not {
+        'Inning', 'Top/Bottom', 'Outs', 'Balls',
+        'Strikes', 'RunsScored', 'PlayResult'
+    }.issubset(df.columns):
+        return None
+
+    df = df[df['Inning'] < 9]
+
+    df = add_runner_states(df)
+    df = add_game_state(df)
+    df = add_runs_remaining(df)
+
+    df = df[(df['Outs'] <= 2) & (df['Balls'] <= 3) & (df['Strikes'] <= 2)]
+
+    df["ExpectedRuns"] = df["GameState"].map(gamestate_to_er).round(4)
+    df["ExpectedRuns_Next"] = df["ExpectedRuns"].shift(-1)
+    df["Top/Bottom_Next"] = df["Top/Bottom"].shift(-1)
+
+    df["RunsScored"] = df["RunsScored"].fillna(0)
+    df["Target"] = df.apply(
+        lambda r: round(r["RunsScored"] - r["ExpectedRuns"], 4)
+        if r["Top/Bottom"] != r["Top/Bottom_Next"]
+        else round(
+            r["RunsScored"] + r["ExpectedRuns_Next"] - r["ExpectedRuns"],
+            4
+        ),
+        axis=1
+    )
+
+    df.drop(columns=["ExpectedRuns_Next", "Top/Bottom_Next"], inplace=True)
+
+    insert_cols = [
+        'RunnerOn1B', 'RunnerOn2B', 'RunnerOn3B',
+        'GameState', 'RunsRemaining', 'ExpectedRuns', 'Target'
+    ]
+
+    idx = df.columns.get_loc('RunsScored') + 1
+    for col in reversed(insert_cols):
+        if col in df.columns:
+            df.insert(idx, col, df.pop(col))
+
+    return df.loc[:, [c for c in REQUIRED_COLS if c in df.columns]]
+
+
+def generate_target_for_files(file_paths, summary_path):
+    """Build the target-integrated frame for an explicit list of game CSVs."""
     gamestate_to_er = load_gamestate_to_er(summary_path)
     all_dfs = []
 
-    total_days = calendar.monthrange(int(year), int(month))[1]
-
-    for day in range(1, total_days + 1):
-        day_str = str(day).zfill(2)
-        folder_path = os.path.join(base_path, year, month, day_str, "CSV")
-
-        if not os.path.exists(folder_path):
-            continue
-
-        for file in os.listdir(folder_path):
-            file_lower = file.lower()
-            if (
-                not file_lower.endswith(".csv")
-                or "unverified" in file_lower
-                or "playerpositioning" in file_lower
-            ):
-                continue
-
-            file_path = os.path.join(folder_path, file)
-
-            try:
-                df = pd.read_csv(file_path)
-
-                if df.empty or not {
-                    'Inning', 'Top/Bottom', 'Outs', 'Balls',
-                    'Strikes', 'RunsScored', 'PlayResult'
-                }.issubset(df.columns):
-                    continue
-
-                df = df[df['Inning'] < 9]
-
-                df = add_runner_states(df)
-                df = add_game_state(df)
-                df = add_runs_remaining(df)
-
-                df = df[(df['Outs'] <= 2) & (df['Balls'] <= 3) & (df['Strikes'] <= 2)]
-
-                df["ExpectedRuns"] = df["GameState"].map(gamestate_to_er).round(4)
-                df["ExpectedRuns_Next"] = df["ExpectedRuns"].shift(-1)
-                df["Top/Bottom_Next"] = df["Top/Bottom"].shift(-1)
-
-                df["RunsScored"] = df["RunsScored"].fillna(0)
-                df["Target"] = df.apply(
-                    lambda r: round(r["RunsScored"] - r["ExpectedRuns"], 4)
-                    if r["Top/Bottom"] != r["Top/Bottom_Next"]
-                    else round(
-                        r["RunsScored"] + r["ExpectedRuns_Next"] - r["ExpectedRuns"],
-                        4
-                    ),
-                    axis=1
-                )
-
-                df.drop(columns=["ExpectedRuns_Next", "Top/Bottom_Next"], inplace=True)
-
-                insert_cols = [
-                    'RunnerOn1B', 'RunnerOn2B', 'RunnerOn3B',
-                    'GameState', 'RunsRemaining', 'ExpectedRuns', 'Target'
-                ]
-
-                idx = df.columns.get_loc('RunsScored') + 1
-                for col in reversed(insert_cols):
-                    if col in df.columns:
-                        df.insert(idx, col, df.pop(col))
-
-                df = df.loc[:, [c for c in REQUIRED_COLS if c in df.columns]]
+    for file_path in file_paths:
+        try:
+            df = generate_target_for_game_file(file_path, gamestate_to_er)
+            if df is not None and not df.empty:
                 all_dfs.append(df)
-
-            except Exception as e:
-                print(f"Error in {file_path}: {e}")
+        except Exception as e:
+            print(f"Error in {file_path}: {e}")
 
     if not all_dfs:
         return None
@@ -112,20 +107,60 @@ def generate_target_for_month(base_path, year, month, summary_path):
 
 
 def generate_target_for_years_df(base_path, years, summary_path):
-    all_year_dfs = []
+    # A game's CSV lands in the folder for the day it was FETCHED, not played, so a
+    # revised game is re-pulled into a later day folder. Reading every folder loaded
+    # every copy (~6% of rows in the 2024-2025 build) AND kept the pre-correction
+    # values, since the later copy is the one with the fixed BatterSide, real
+    # BatterId, and corrected PlayResult. Resolve to the newest copy per game before
+    # reading anything. See Helpers.resolve_latest_game_files.
+    file_paths = resolve_latest_game_files(base_path, years=years)
+    if not file_paths:
+        print(f"No game CSVs found under {base_path} for years {years}.")
+        return None
 
-    for year in years:
-        print(f"Processing year {year}")
-        for month in [f"{m:02d}" for m in range(1, 13)]:
-            df_m = generate_target_for_month(base_path, year, month, summary_path)
-            if df_m is not None and not df_m.empty:
-                all_year_dfs.append(df_m)
+    superseded = count_superseded_copies(base_path, years=years)
+    print(
+        f"Resolved {len(file_paths)} games for years {years}; "
+        f"skipped {superseded} superseded copies."
+    )
 
-    if not all_year_dfs:
+    # Grouped only for progress output. file_paths is in ascending fetch order and
+    # that order is preserved here, which the PitchUID pass below depends on.
+    by_month = defaultdict(list)
+    for path in file_paths:
+        # .../<year>/<month>/<day>/CSV/<file>.csv
+        parts = os.path.normpath(path).split(os.sep)
+        by_month[(parts[-5], parts[-4])].append(path)
+
+    all_month_dfs = []
+    for (year, month) in sorted(by_month):
+        print(f"Processing {year}-{month} ({len(by_month[(year, month)])} games)")
+        df_m = generate_target_for_files(by_month[(year, month)], summary_path)
+        if df_m is not None and not df_m.empty:
+            all_month_dfs.append(df_m)
+
+    if not all_month_dfs:
         print("No valid files processed.")
         return None
 
-    return pd.concat(all_year_dfs, ignore_index=True)
+    combined = pd.concat(all_month_dfs, ignore_index=True)
+
+    # File-level resolution handles re-pulls of the SAME filename. One pitch can
+    # still appear under two different filenames when a suspended game is first
+    # exported as a continuation and later re-issued whole under its original date.
+    # Rows arrive in ascending fetch order, so keep="last" keeps the re-issued
+    # version, which carries the correct GameID and continuous PitchNo.
+    if "PitchUID" in combined.columns:
+        before = len(combined)
+        combined = combined.drop_duplicates(subset=["PitchUID"], keep="last")
+        dropped = before - len(combined)
+        if dropped:
+            print(
+                f"Dropped {dropped} rows ({100 * dropped / before:.3f}%) whose PitchUID "
+                f"appeared under two game files, keeping the most recently pulled copy."
+            )
+
+    return combined.reset_index(drop=True)
 
 
 def add_calculated_features(df):
@@ -224,13 +259,43 @@ def build_final_dataset(base_path, years, summary_path, out_dir, save=True):
     return final_df
 
 
-# ---------------- RUN ----------------
-final_df = build_final_dataset(
-    base_path="/Users/suma/Downloads/Baseball_Project/v3",
-    years=["2024", "2025"],
-    summary_path="/Users/suma/Downloads/Baseball_Project/CSV_files/new_approach/GameState_Summary_20260711_1512.csv",
-    out_dir="/Users/suma/Downloads/Baseball_Project/CSV_files/new_approach",
-    save=True
-)
+def output_path(out_dir, out_name=None):
+    """Where the final dataset lands.
 
-final_df
+    A scheduled run must pass --out-name so the next stage can predict the path.
+    The clock-based default is kept only for interactive one-off builds.
+    """
+    if out_name:
+        return os.path.join(out_dir, out_name)
+    return os.path.join(out_dir, f"Final_Target_Calc_{datetime.now().strftime('%H%M')}.csv")
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Build Final_Target_Calc from the game-file tree.")
+    ap.add_argument("--base-path", required=True,
+                    help="root of the year/month/day/CSV game tree")
+    ap.add_argument("--years", required=True,
+                    help="comma-separated years, e.g. 2025,2026")
+    ap.add_argument("--summary-path", required=True,
+                    help="game-state summary parquet/csv path")
+    ap.add_argument("--out-dir", required=True)
+    ap.add_argument("--out-name", default=None,
+                    help="deterministic output filename; required for scheduled runs")
+    args = ap.parse_args(argv)
+
+    years = [y.strip() for y in args.years.split(",") if y.strip()]
+    # save=False skips build_final_dataset's own makedirs, and we write below
+    # regardless, so a first run against a not-yet-created workdir would do the
+    # entire build and then fail at the write.
+    os.makedirs(args.out_dir, exist_ok=True)
+    out = output_path(args.out_dir, args.out_name)
+    df = build_final_dataset(args.base_path, years, args.summary_path, args.out_dir, save=False)
+    df.to_csv(out, index=False)
+    print(f"wrote {out} ({len(df)} rows)")
+    return 0
+
+
+# ---------------- RUN ----------------
+# Guarded so the module can be imported (and tested) without kicking off a full build.
+if __name__ == "__main__":
+    sys.exit(main())

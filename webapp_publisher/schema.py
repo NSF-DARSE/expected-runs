@@ -50,12 +50,20 @@ def validate_bundle(bundle: dict) -> None:
             raise ValueError(f"pitcher row {r.get('name')} missing {missing}")
         if r["locFlag"] not in ("", "caution", "small sample"):
             raise ValueError(f"bad locFlag {r['locFlag']}")
+        # The board card shows the same three terms the pitcher page does, and
+        # the baseline is not recoverable from the rows, so a board row carrying
+        # a decomposition without one would silently under-report the score.
+        if r.get("locWhere") and not isinstance(r.get("locBaseline"), (int, float)):
+            raise ValueError(
+                f"board row {r.get('name')} has a Location+ decomposition but no "
+                f"numeric locBaseline"
+            )
         _check_stuff_attr_detail(r)
 
 
 REQUIRED_ARSENAL_KEYS = {"type", "label", "n", "usage", "stuff", "loc",
-                         "recentChange", "avgVelo", "locWhere", "aboveFloor",
-                         "typical", "percentiles"}
+                         "recentChange", "avgVelo", "locWhere", "locBaseline",
+                         "aboveFloor", "typical", "percentiles"}
 
 # How far the location decomposition may drift from the score it explains before
 # the publish aborts. The rows are an exact algebraic split of the same mean, so
@@ -63,6 +71,13 @@ REQUIRED_ARSENAL_KEYS = {"type", "label", "n", "usage", "stuff", "loc",
 # "Everywhere else" row rather than discarded. A loose tolerance here would have
 # hidden exactly the bug this caught, where dropped cells cost 1.5 points.
 LOC_DECOMP_TOLERANCE = 0.01
+# The occupancy/placement/baseline split is the same algebra rearranged, with no
+# pooling step that could legitimately lose anything, so it is held to float
+# error rather than to the looser tolerance above.
+LOC_SPLIT_TOLERANCE = 1e-9
+REQUIRED_LOC_WHERE_KEYS = {"region", "count", "n", "share", "leagueShare",
+                           "points", "occupancyPoints", "placementPoints",
+                           "value", "leagueValue"}
 REQUIRED_PITCH_KEYS = {"d", "t", "x", "z", "c", "g", "f"}
 
 # Plausible-range guard for scores on the 100+/-15 display scale. A raw
@@ -223,9 +238,31 @@ def validate_pitcher_bundle(files: dict) -> None:
                         f"they sit under"
                     )
                 for r in a["locWhere"]:
+                    missing = REQUIRED_LOC_WHERE_KEYS - set(r)
+                    if missing:
+                        raise ValueError(
+                            f"{key} Location+ row {r['region']!r} missing {missing}")
                     if not 0.0 <= r["share"] <= 1.0 or not 0.0 <= r["leagueShare"] <= 1.0:
                         raise ValueError(f"{key} Location+ row {r['region']!r} has a share outside 0-1")
-            elif a["locWhere"] is not None:
+                if not isinstance(a["locBaseline"], (int, float)):
+                    raise ValueError(
+                        f"{key} fastball row has no numeric Location+ baseline; without it "
+                        f"the occupancy/placement split does not reach the score"
+                    )
+                # Occupancy + placement + the league's own mix IS the score, by
+                # construction. Anything else means a term was dropped or double
+                # counted, and the page would print columns that do not reach the
+                # number above them.
+                split = (sum(r["occupancyPoints"] for r in a["locWhere"])
+                         + sum(r["placementPoints"] for r in a["locWhere"])
+                         + a["locBaseline"])
+                if abs(split - (a["loc"] - 100.0)) > LOC_SPLIT_TOLERANCE:
+                    raise ValueError(
+                        f"{key} Location+ occupancy plus placement plus baseline is "
+                        f"{split:.9f} but the score is {a['loc'] - 100.0:.9f} off 100; "
+                        f"the split does not explain the number it sits under"
+                    )
+            elif a["locWhere"] is not None or a["locBaseline"] is not None:
                 raise ValueError(
                     f"{key} emits a Location+ decomposition for {a['type']}; Location+ is a "
                     f"fastball score only"

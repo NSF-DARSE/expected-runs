@@ -422,3 +422,101 @@ def test_league_cell_table_is_taken_before_any_team_filter():
     # is passed is not an implementation detail.
     assert full["n"] == 100 and one_team["n"] == 10
     assert full["share"].max() != one_team["share"].max()
+
+
+def _split_frame():
+    """Three regions in the league, one of which pitcher 1 never throws to. That
+    absence is the case the split has to price: he avoids a spot D1 uses."""
+    import pandas as pd
+    rows = []
+    rows += [{"PitcherId": 1, "PlateLocSide": -0.7, "PlateLocHeight": 1.8,
+              "BatterSide": "Right", "count12": "0-2", "loc": -0.02}] * 30
+    rows += [{"PitcherId": 1, "PlateLocSide": 0.0, "PlateLocHeight": 2.5,
+              "BatterSide": "Right", "count12": "0-0", "loc": 0.01}] * 10
+    # Only pitcher 2 lives up and in, and only pitcher 2 throws in 3-0 counts.
+    rows += [{"PitcherId": 2, "PlateLocSide": 0.7, "PlateLocHeight": 3.2,
+              "BatterSide": "Right", "count12": "3-0", "loc": 0.04}] * 25
+    rows += [{"PitcherId": 2, "PlateLocSide": 0.0, "PlateLocHeight": 2.5,
+              "BatterSide": "Right", "count12": "0-0", "loc": 0.02}] * 35
+    return pd.DataFrame(rows)
+
+
+def test_occupancy_and_placement_and_baseline_reach_the_score_exactly():
+    """The identity the two new columns exist to satisfy. `points` alone mixed
+    occupancy, placement and the league's own mix into one number, and the page
+    named only the first, which measured on a real staff was the smaller of the
+    two terms it was standing in for.
+    """
+    import arsenal as ar
+    df = _split_frame()
+    mu, sd = 0.0, 0.02
+    his = df[df["PitcherId"] == 1]
+    rows = ar.location_decomposition(his, df, mu, sd, min_share=0.0)
+    baseline = ar.location_baseline(df, mu, sd)
+    total = (sum(r["occupancyPoints"] for r in rows)
+             + sum(r["placementPoints"] for r in rows) + baseline)
+    expected = float(ar.to_display(his["loc"].mean(), mu, sd)) - 100.0
+    assert total == pytest.approx(expected, abs=1e-9)
+    # The old contract still holds alongside the new one.
+    assert sum(r["points"] for r in rows) == pytest.approx(expected, abs=1e-9)
+
+
+def test_a_spot_he_never_throws_to_is_priced_as_occupancy():
+    """Avoiding a region D1 uses is a fact about where he lives, so it belongs in
+    the occupancy term and nowhere else. Iterating only his own cells would drop
+    it, and would also make the baseline term depend on his coverage rather than
+    on the league.
+    """
+    import arsenal as ar
+    df = _split_frame()
+    his = df[df["PitcherId"] == 1]
+    rows = ar.location_decomposition(his, df, 0.0, 0.02, min_share=0.0)
+    pooled = next(r for r in rows if r["region"] == "Everywhere else")
+    # Up and in, 3-0: 25 of 100 league pitches, none of his.
+    assert pooled["leagueShare"] == pytest.approx(0.25)
+    assert pooled["share"] == pytest.approx(0.0)
+    assert pooled["n"] == 0
+    assert pooled["placementPoints"] == pytest.approx(0.0)
+    assert pooled["occupancyPoints"] != pytest.approx(0.0)
+    # A pooled row without a league value is what blocked the split before; it
+    # has to be a real share-weighted number over exactly the cells pooled here.
+    assert pooled["leagueValue"] == pytest.approx(0.04)
+
+
+def test_the_baseline_is_the_same_number_for_every_pitcher():
+    """The reason it is one scalar and not a column. Summed over only the cells a
+    pitcher happens to throw to it is not constant, which is precisely the trap:
+    it would read as a league term while actually measuring his coverage.
+    """
+    import arsenal as ar
+    df = _split_frame()
+    mu, sd = 0.0, 0.02
+    table = ar.league_cell_table(df)
+    ones = [ar.location_baseline(table, mu, sd) for _ in (1, 2)]
+    assert ones[0] == pytest.approx(ones[1], abs=1e-12)
+
+    # And it really does differ if restricted to one pitcher's own cells, so the
+    # full-league sum is doing work rather than being an equivalent spelling.
+    def over_his_cells(pid):
+        rows = ar.location_decomposition(df[df["PitcherId"] == pid], df, mu, sd,
+                                         min_share=0.0)
+        seen = {(r["region"], r["count"]) for r in rows if r["share"] > 0}
+        return sum(-15.0 * float(table["share"][c]) * (float(table["value"][c]) - mu) / sd
+                   for c in table["share"].index if c in seen)
+    assert over_his_cells(1) != pytest.approx(over_his_cells(2))
+
+
+def test_pooled_row_league_value_covers_exactly_the_pooled_cells():
+    """The blocker this work had to clear first: the pooled row's leagueValue was
+    NaN, so the split could not be completed downstream at all.
+    """
+    import arsenal as ar
+    import pandas as pd
+    rows = [{"PitcherId": 1, "PlateLocSide": -0.7, "PlateLocHeight": 1.8,
+             "BatterSide": "Right", "count12": "0-2", "loc": -0.02} for _ in range(99)]
+    rows.append({"PitcherId": 1, "PlateLocSide": 0.0, "PlateLocHeight": 2.5,
+                 "BatterSide": "Right", "count12": "0-0", "loc": 0.5})
+    df = pd.DataFrame(rows)
+    out = ar.location_decomposition(df, df, 0.0, 0.02, min_share=0.05)
+    pooled = next(r for r in out if r["region"] == "Everywhere else")
+    assert pooled["leagueValue"] == pytest.approx(0.5)

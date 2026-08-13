@@ -17,12 +17,17 @@ GOOD = {
         "arsenal": [{"type": "FF", "label": "Fastball", "n": 412, "usage": 1.0,
                      "stuff": 124.0, "loc": 103.0, "recentChange": -6.2,
                      "avgVelo": 93.1, "aboveFloor": True,
+                     # points sum to loc - 100, and occupancy + placement +
+                     # locBaseline reach the same 3.0 by the other route.
                      "locWhere": [{"region": "Down and away", "count": "ahead", "n": 200,
                                    "share": 0.5, "leagueShare": 0.3, "points": 3.0,
+                                   "occupancyPoints": 2.0, "placementPoints": 0.5,
                                    "value": -0.01, "leagueValue": -0.005},
                                   {"region": "Up, middle", "count": "even", "n": 212,
                                    "share": 0.5, "leagueShare": 0.4, "points": 0.0,
+                                   "occupancyPoints": 0.0, "placementPoints": 0.0,
                                    "value": 0.0, "leagueValue": 0.0}],
+                     "locBaseline": 0.5,
                      "typical": [2350.0], "percentiles": [78]}],
         "outings": [{"date": "2026-03-15", "type": "FF", "n": 42, "stuff": 118.0}],
         "pitches": [{"d": "2026-03-15", "t": "FF", "x": -0.42, "z": 2.31,
@@ -332,4 +337,36 @@ def test_an_unscaled_adjusted_results_value_is_still_rejected():
     bad = copy.deepcopy(GOOD)
     bad["staff_by_type.json"]["types"][0]["pitchers"][0]["adjRes"] = -0.031
     with pytest.raises(ValueError, match="Adj Results"):
+        validate_pitcher_bundle(bad)
+
+
+def test_occupancy_plus_placement_plus_baseline_that_misses_the_score_is_rejected():
+    """The page prints occupancy and placement as separate columns under the
+    score, so the three terms have to reach it. `points` summing correctly is not
+    enough: the split is a different arrangement of the same algebra and can be
+    wrong on its own.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["arsenal"][0]["locWhere"][0]["occupancyPoints"] = 9.0
+    with pytest.raises(ValueError, match="does not explain the number"):
+        validate_pitcher_bundle(bad)
+
+
+def test_fastball_decomposition_without_a_baseline_is_rejected():
+    """The baseline is not recoverable from the rows, so a bundle missing it
+    leaves the two columns short of the score with nothing to name the gap.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["arsenal"][0]["locBaseline"] = None
+    with pytest.raises(ValueError, match=r"no numeric Location\+ baseline"):
+        validate_pitcher_bundle(bad)
+
+
+def test_location_row_missing_a_split_column_is_rejected():
+    """A bundle published before the split existed still validates its `points`,
+    so the per-row key check is the only thing that catches it.
+    """
+    bad = copy.deepcopy(GOOD)
+    del bad["pitchers/1000123.json"]["arsenal"][0]["locWhere"][0]["placementPoints"]
+    with pytest.raises(ValueError, match="missing"):
         validate_pitcher_bundle(bad)

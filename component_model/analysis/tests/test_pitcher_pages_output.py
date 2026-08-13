@@ -42,13 +42,14 @@ def _fitted():
         "ridge_pred": [-0.01, 0.00, 0.01, 0.02, -0.02, 0.00],
         "PlateLocSide": rng.normal(0, 0.5, n),
         "PlateLocHeight": rng.normal(2.5, 0.5, n),
-        "count12": ["0-0"] * n,
         # Raw location run values, pitcher's perspective (lower = better).
         # Pitcher 1 locates better than pitcher 2.
         "loc": [-0.01] * 3 + [0.01] * 3,
         # Real release speed. Deliberately not in `feats`: it carries no ridge
         # coefficient and exists only as context beside the pitch type.
         "RelSpeed": [93.0, 94.0, 92.0, 88.0, 89.0, 87.0],
+        "BatterSide": ["Right", "Left", "Right", "Left", "Right", "Left"],
+        "count12": ["0-0"] * n,
     })
     for f in feats:
         pitches[f] = rng.normal(0, 1, n)
@@ -271,3 +272,48 @@ def test_attach_location_fails_loudly_when_no_earlier_season_exists():
     state = {"pitches": pit.copy()}
     with pytest.raises(ValueError, match="train the location map"):
         mod.attach_location(pit, state, None, _FakeFC, 2025, floor_n=1)
+
+
+def _loc_frame():
+    """Two pitchers with deliberately different location habits: pitcher 1 lives
+    down and away in two-strike counts, pitcher 2 lives middle-middle."""
+    import pandas as pd
+    rows = []
+    for i in range(40):
+        rows.append({"PitcherId": 1, "PlateLocSide": -0.7, "PlateLocHeight": 1.8,
+                     "BatterSide": "Right", "count12": "0-2", "loc": -0.02})
+    for i in range(40):
+        rows.append({"PitcherId": 2, "PlateLocSide": 0.0, "PlateLocHeight": 2.5,
+                     "BatterSide": "Right", "count12": "0-0", "loc": 0.02})
+    return pd.DataFrame(rows)
+
+
+def test_location_decomposition_sums_to_the_score_it_explains():
+    """The guarantee that makes the card checkable by hand: the rows add to his
+    Location+ minus 100. A decomposition that does not close is a decomposition
+    a coach cannot trust, and the arsenal table already learned that lesson.
+    """
+    import numpy as np
+    import arsenal as ar
+    df = _loc_frame()
+    mu, sd = 0.0, 0.02
+    his = df[df["PitcherId"] == 1]
+    rows = ar.location_decomposition(his, df, mu, sd, min_share=0.0)
+    location_plus = ar.to_display(his["loc"].mean(), mu, sd)
+    assert sum(r["points"] for r in rows) == pytest.approx(float(location_plus) - 100.0, abs=1e-9)
+
+
+def test_location_decomposition_reports_both_shares_not_just_points():
+    """The question the card answers is why a region paid him, and at this grain
+    the answer is occupancy: the map values a spot the same for everyone, so his
+    edge is being there more than the field. Points without the two shares state
+    the effect and hide the cause.
+    """
+    import arsenal as ar
+    df = _loc_frame()
+    rows = ar.location_decomposition(df[df["PitcherId"] == 1], df, 0.0, 0.02, min_share=0.0)
+    top = rows[0]
+    assert top["region"] == "Down and away"
+    assert top["count"] == "ahead"
+    assert top["share"] == pytest.approx(1.0)      # every one of his pitches
+    assert top["leagueShare"] == pytest.approx(0.5)  # half the league's

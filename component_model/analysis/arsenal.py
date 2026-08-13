@@ -187,3 +187,109 @@ def fit_type(pit: pd.DataFrame, tags: set[str] | None, floor_n: int, fc_module, 
         "reference_features": feature_means.loc[qualified],
         "n_qualified": int(len(qualified)),
     }
+
+
+# ---------------- Location+ decomposition: where the score came from ----------
+
+# The nominal zone the page draws, so a region named here is the region a coach
+# sees on the plot. Half-plate plus a ball, and the conventional 1.5-3.5 ft band.
+ZONE_HALF_WIDTH = 0.83
+ZONE_BOTTOM, ZONE_TOP = 1.5, 3.5
+
+# Away is NEGATIVE PlateLocSide for a right-handed hitter and POSITIVE for a
+# left-handed one. Measured rather than assumed: on 727k four-seams the mean
+# PlateLocSide is -0.214 against RHH and +0.277 against LHH, and the split holds
+# inside each pitcher hand (RHP/LHH +0.286, LHP/LHH +0.245), so it is a property
+# of which box the hitter stands in and not a pitcher-side artifact.
+def _side_relative(plate_side, batter_side):
+    """PlateLocSide re-expressed so POSITIVE is always away from the hitter."""
+    return np.where(batter_side == "Right", -plate_side, plate_side)
+
+
+def _height_band(z):
+    third = (ZONE_TOP - ZONE_BOTTOM) / 3
+    return np.select(
+        [z < ZONE_BOTTOM, z < ZONE_BOTTOM + third, z < ZONE_BOTTOM + 2 * third, z <= ZONE_TOP],
+        ["off", "Down", "Middle", "Up"], default="off")
+
+
+def _side_band(s):
+    third = (2 * ZONE_HALF_WIDTH) / 3
+    return np.select(
+        [s < -ZONE_HALF_WIDTH, s < -ZONE_HALF_WIDTH + third,
+         s < -ZONE_HALF_WIDTH + 2 * third, s <= ZONE_HALF_WIDTH],
+        ["off", "in", "middle", "away"], default="off")
+
+
+def _region_label(hband, sband):
+    if hband == "off" or sband == "off":
+        return "Off the plate"
+    if sband == "middle":
+        return f"{hband}, middle"
+    return f"{hband} and {sband}"
+
+
+def count_bucket(count12):
+    """Pitcher ahead, even, or behind. Three buckets rather than twelve counts:
+    the comparison against a league share needs enough pitches in each cell to
+    mean anything, and a coach reads put-away counts as one situation."""
+    balls, strikes = (int(x) for x in str(count12).split("-"))
+    if strikes > balls:
+        return "ahead"
+    if strikes == balls:
+        return "even"
+    return "behind"
+
+
+def location_decomposition(sub, league, loc_mu, loc_sd, min_share=0.01):
+    """Split a pitcher's Location+ into where he threw, against the league mix.
+
+    Location+ is a mean of per-pitch location values, and a mean splits
+    additively, so each cell's points are exact and they sum to his score minus
+    100. `sub` is his pitches, `league` every pitch of that type this season.
+
+    Note what this decomposition is NOT. The location map values a spot the same
+    way for everyone, so at this grain the pitcher-specific part is almost
+    entirely OCCUPANCY: his points come from being in a cell more or less often
+    than the field, not from the cell being worth more to him. That is why each
+    row reports both shares. What is left over is where he sits inside the cell,
+    reported as his value against the league's for the same cell.
+    """
+    def cells(df):
+        s = _side_relative(df["PlateLocSide"].values, df["BatterSide"].values)
+        h = _height_band(df["PlateLocHeight"].values)
+        b = _side_band(s)
+        return pd.Series([_region_label(hh, bb) for hh, bb in zip(h, b)], index=df.index)
+
+    sub = sub.copy()
+    league = league.copy()
+    sub["region"] = cells(sub)
+    league["region"] = cells(league)
+    sub["bucket"] = [count_bucket(c) for c in sub["count12"]]
+    league["bucket"] = [count_bucket(c) for c in league["count12"]]
+
+    lg_share = league.groupby(["region", "bucket"]).size() / len(league)
+    lg_value = league.groupby(["region", "bucket"])["loc"].mean()
+
+    rows = []
+    n = len(sub)
+    for (region, bucket), g in sub.groupby(["region", "bucket"]):
+        share = len(g) / n
+        if share < min_share:
+            continue
+        his_value = float(g["loc"].mean())
+        # to_display negates, so a LOWER run value has to come out as POSITIVE
+        # points. Dropping this sign was a real bug on `loc` once already.
+        points = -DISPLAY_SPREAD * share * (his_value - loc_mu) / loc_sd
+        rows.append({
+            "region": region,
+            "count": bucket,
+            "n": int(len(g)),
+            "share": float(share),
+            "leagueShare": float(lg_share.get((region, bucket), 0.0)),
+            "points": float(points),
+            "value": his_value,
+            "leagueValue": float(lg_value.get((region, bucket), np.nan)),
+        })
+    rows.sort(key=lambda r: -abs(r["points"]))
+    return rows

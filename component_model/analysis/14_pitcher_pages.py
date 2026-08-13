@@ -91,6 +91,11 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
                 # only its correctness is enforced downstream.
                 "avgVelo": (float(sub["RelSpeed"].mean())
                             if "RelSpeed" in sub.columns else None),
+                # Where his Location+ came from. Fastball only, because that is
+                # the only type with a Location+ at all.
+                "locWhere": (ar.location_decomposition(sub, state["pitches"],
+                                                       state["loc_mu"], state["loc_sd"])
+                             if tname == "FF" else None),
                 "aboveFloor": bool(len(sub) >= floor_n),
                 "typical": [float(v) for v in sub[feats].mean().values],
                 # Percentile of each of his typical trait values against the

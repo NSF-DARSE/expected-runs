@@ -17,6 +17,12 @@ GOOD = {
         "arsenal": [{"type": "FF", "label": "Fastball", "n": 412, "usage": 1.0,
                      "stuff": 124.0, "loc": 103.0, "recentChange": -6.2,
                      "avgVelo": 93.1, "aboveFloor": True,
+                     "locWhere": [{"region": "Down and away", "count": "ahead", "n": 200,
+                                   "share": 0.5, "leagueShare": 0.3, "points": 3.0,
+                                   "value": -0.01, "leagueValue": -0.005},
+                                  {"region": "Up, middle", "count": "even", "n": 212,
+                                   "share": 0.5, "leagueShare": 0.4, "points": 0.0,
+                                   "value": 0.0, "leagueValue": 0.0}],
                      "typical": [2350.0], "percentiles": [78]}],
         "outings": [{"date": "2026-03-15", "type": "FF", "n": 42, "stuff": 118.0}],
         "pitches": [{"d": "2026-03-15", "t": "FF", "x": -0.42, "z": 2.31,
@@ -280,4 +286,29 @@ def test_unscaled_staff_stuff_value_is_rejected():
     bad = copy.deepcopy(GOOD)
     bad["staff_by_type.json"]["types"][0]["pitchers"][0]["stuff"] = -0.0231
     with pytest.raises(ValueError, match="Stuff"):
+        validate_pitcher_bundle(bad)
+
+
+def test_location_decomposition_that_does_not_sum_to_its_score_is_rejected():
+    """The rows are an exact split of the same mean, so a gap is a bug rather
+    than rounding: a mismatched population, a dropped cell, or a lost sign. The
+    page presents these as adding up, so a publish that does not add up must
+    not ship.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["arsenal"][0]["locWhere"][0]["points"] = 40.0
+    with pytest.raises(ValueError, match="do not explain the number"):
+        validate_pitcher_bundle(bad)
+
+
+def test_secondary_pitch_type_carrying_a_location_decomposition_is_rejected():
+    """Same construct leak the `loc` check catches, one level down: a slider has
+    no Location+, so it cannot have a breakdown of one either.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["arsenal"][0]["type"] = "Slider"
+    bad["pitchers/1000123.json"]["arsenal"][0]["loc"] = None
+    bad["model_artifacts.json"]["byPitchType"]["Slider"] =         copy.deepcopy(bad["model_artifacts.json"]["byPitchType"]["FF"])
+    bad["staff_by_type.json"]["types"][0]["type"] = "Slider"
+    with pytest.raises(ValueError, match="fastball score only"):
         validate_pitcher_bundle(bad)

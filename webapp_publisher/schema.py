@@ -20,7 +20,15 @@ def validate_bundle(bundle: dict) -> None:
 
 
 REQUIRED_ARSENAL_KEYS = {"type", "label", "n", "usage", "stuff", "loc",
-                         "recentChange", "avgVelo", "aboveFloor", "typical", "percentiles"}
+                         "recentChange", "avgVelo", "locWhere", "aboveFloor",
+                         "typical", "percentiles"}
+
+# How far the location decomposition may drift from the score it explains before
+# the publish aborts. The rows are an exact algebraic split of the same mean, so
+# any real gap is a bug (a mismatched population, a dropped cell, a lost sign),
+# not rounding. The tolerance covers float error and the small-share cells the
+# decomposition omits on purpose.
+LOC_DECOMP_TOLERANCE = 1.0
 REQUIRED_PITCH_KEYS = {"d", "t", "x", "z", "c", "g", "f"}
 
 # Plausible-range guard for scores on the 100+/-15 display scale. A raw
@@ -150,6 +158,24 @@ def validate_pitcher_bundle(files: dict) -> None:
                 _check_display_band(a["loc"], DISPLAY_BAND, key=key, field="fastball Location+", ptype=a["type"])
             _check_display_band(a["stuff"], DISPLAY_BAND, key=key, field="arsenal Stuff+", ptype=a["type"])
             _check_velo(a["avgVelo"], key=key, ptype=a["type"])
+            if a["type"] == "FF":
+                if not a["locWhere"]:
+                    raise ValueError(f"{key} fastball row has no Location+ decomposition")
+                total = sum(r["points"] for r in a["locWhere"])
+                if abs(total - (a["loc"] - 100.0)) > LOC_DECOMP_TOLERANCE:
+                    raise ValueError(
+                        f"{key} Location+ decomposition sums to {total:.2f} but the score is "
+                        f"{a['loc'] - 100.0:.2f} off 100; the rows do not explain the number "
+                        f"they sit under"
+                    )
+                for r in a["locWhere"]:
+                    if not 0.0 <= r["share"] <= 1.0 or not 0.0 <= r["leagueShare"] <= 1.0:
+                        raise ValueError(f"{key} Location+ row {r['region']!r} has a share outside 0-1")
+            elif a["locWhere"] is not None:
+                raise ValueError(
+                    f"{key} emits a Location+ decomposition for {a['type']}; Location+ is a "
+                    f"fastball score only"
+                )
             if a["type"] not in model["byPitchType"]:
                 raise ValueError(
                     f"{key} arsenal has pitch type {a['type']!r} with no matching entry "

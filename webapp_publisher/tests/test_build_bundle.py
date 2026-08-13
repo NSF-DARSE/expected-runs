@@ -141,3 +141,20 @@ def test_to_native_handles_numpy_scalars_and_arrays():
 
     nested = to_native({"a": np.int64(3), "b": [np.float64("nan")]})
     assert nested == {"a": 3, "b": [None]}
+
+def test_validate_bundle_rejects_a_board_decomposition_with_no_baseline():
+    """The hover card adds occupancy, placement and the league's own mix up to
+    the score beside it, and the third term is not recoverable from the rows. A
+    board row carrying the decomposition without it would come up short.
+    """
+    staff_scores = json.loads((pathlib.Path(__file__).parent/"fixtures"/"staff_scores.json").read_text())
+    bundle = build_bundle(staff_scores, season=2026, data_through="2026-03-15", built_iso="x")
+    for r in bundle["staff_board.json"]["pitchers"]:
+        r["pitcherId"] = 1000101
+        r["stuffAttrDetail"] = _stub_stuff_attr_detail(r)
+    bundle["staff_board.json"]["pitchers"][0]["locWhere"] = [
+        {"region": "Down and away", "count": "ahead", "n": 41, "share": 0.31,
+         "leagueShare": 0.18, "points": 14.0, "occupancyPoints": 9.0,
+         "placementPoints": 4.5, "value": -0.004, "leagueValue": -0.002}]
+    with pytest.raises(ValueError, match="no numeric locBaseline"):
+        validate_bundle(bundle)

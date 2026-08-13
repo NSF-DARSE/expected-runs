@@ -288,6 +288,27 @@ def league_cell_table(league, qualified_ids=None):
     return {"share": g.size() / len(df), "value": g["loc"].mean(), "n": int(len(df))}
 
 
+def location_baseline(league, loc_mu, loc_sd):
+    """The league's own location mix, in Location+ points. Identical for every
+    pitcher, which is exactly why it is reported once instead of per row.
+
+    It is the third term of the split in `location_decomposition`, summed over
+    the FULL league cell set: sum over cells of w*(v* - mu). Restricted to only
+    the cells one pitcher happens to throw to it is NOT constant (measured on a
+    real staff it ranged -24 to -2 points, entirely because coverage differs),
+    so a per-pitcher "baseline" computed that way would be a coverage artifact
+    dressed as a league constant. Computing it here, from the league table
+    alone, makes that mistake unavailable to a caller.
+    """
+    table = league if isinstance(league, dict) else league_cell_table(league)
+    lg_share, lg_value = table["share"], table["value"]
+    total = sum(
+        float(lg_share[cell]) * (float(lg_value[cell]) - loc_mu)
+        for cell in lg_share.index
+    )
+    return float(-DISPLAY_SPREAD * total / loc_sd)
+
+
 def location_decomposition(sub, league, loc_mu, loc_sd, min_share=0.01):
     """Split a pitcher's Location+ into where he threw, against the league mix.
 
@@ -295,25 +316,36 @@ def location_decomposition(sub, league, loc_mu, loc_sd, min_share=0.01):
     additively, so each cell's points are exact and they sum to his score minus
     100. `sub` is his pitches, `league` every pitch of that type this season.
 
-    Note what this decomposition is NOT. A row's points are the FULL term,
-    share x (his value - the scale's zero), which mixes three things that a
-    reader will assume are separated and are not:
+    A row's `points` is the FULL term, share x (his value - the scale's zero),
+    which mixes three things a reader will assume are separated:
 
       w(v - mu) = (w - w*)(v* - mu)   occupancy: he is here more, or less
                 + w(v - v*)           placement: where he sits INSIDE the cell
                 + w*(v* - mu)         the league's own mix, common to everyone
 
-    It was written on the assumption that occupancy dominates at this grain,
-    since the map prices a square the same for everyone. Measured on a real
-    staff that is backwards: occupancy correlates 0.40 with Location+ and
-    placement 0.82. The regions are coarse enough ("off the plate" runs from
-    just-missing to nowhere-near) that the spread inside one is larger than the
-    spread between pitchers' region mixes.
+    So the first two are emitted per row as `occupancyPoints` and
+    `placementPoints`, and the third is `location_baseline`, one scalar.
 
-    Emitting the three terms separately needs a league value for the pooled
-    rare-cell row, which is np.nan today, so the split cannot be completed
-    downstream either. Until that lands, do not let a caller present these
-    points as occupancy.
+    Measured on a real 18-pitcher staff, occupancy correlates 0.82 with
+    Location+ and placement 0.81, with standard deviations of 8.7 and 8.6 points
+    against 14.1 for the score. Neither is the term that explains it. An earlier
+    reading put occupancy at 0.40, but that was computed over only the cells a
+    pitcher throws to, which drops every spot he AVOIDS -- most of the occupancy
+    signal. That is the mistake the union below exists to make impossible.
+
+    Cells are the UNION of his and the league's. A cell D1 throws to and he
+    never does is an occupancy fact about him -- he avoids it -- worth
+    -w*(v* - mu), and it is what makes the baseline term above come out
+    constant across pitchers. Such a cell contributes nothing to `points`, and
+    is pooled rather than given a line of its own: a spot he never throws to is
+    not a spot on his card.
+
+    A cell HE throws to that the league never does has no v*, so there is no
+    inside-the-region comparison to make; v* falls back to his own value, which
+    puts the whole term in occupancy where it belongs.
+
+    Identity, exact to float error:
+      sum(occupancyPoints) + sum(placementPoints) + baseline == score - 100
     """
     def cells(df):
         s = _side_relative(df["PlateLocSide"].values, df["BatterSide"].values)
@@ -330,28 +362,47 @@ def location_decomposition(sub, league, loc_mu, loc_sd, min_share=0.01):
     table = league if isinstance(league, dict) else league_cell_table(league)
     lg_share, lg_value = table["share"], table["value"]
 
-    rows = []
-    dropped = []
     n = len(sub)
+    his = {}
     for (region, bucket), g in sub.groupby(["region", "bucket"]):
-        share = len(g) / n
-        his_value = float(g["loc"].mean())
-        if share < min_share:
-            dropped.append((g, share, his_value))
-            continue
-        # to_display negates, so a LOWER run value has to come out as POSITIVE
-        # points. Dropping this sign was a real bug on `loc` once already.
-        points = -DISPLAY_SPREAD * share * (his_value - loc_mu) / loc_sd
-        rows.append({
-            "region": region,
-            "count": bucket,
-            "n": int(len(g)),
+        his[(region, bucket)] = (len(g) / n, float(g["loc"].mean()), int(len(g)))
+
+    def terms(cell, share, his_value):
+        """Occupancy, placement and points for one cell, all in display points."""
+        lg_w = float(lg_share.get(cell, 0.0))
+        lg_v = float(lg_value.get(cell, np.nan))
+        if lg_w == 0.0 or not np.isfinite(lg_v):
+            lg_v = his_value          # no league version of this spot to sit inside
+        k = -DISPLAY_SPREAD / loc_sd
+        return (k * (share - lg_w) * (lg_v - loc_mu),   # occupancy
+                k * share * (his_value - lg_v),         # placement
+                k * share * (his_value - loc_mu),       # the full term
+                lg_w, lg_v)
+
+    rows, dropped = [], []
+    for cell in sorted(set(his) | set(lg_share.index)):
+        share, his_value, count = his.get(cell, (0.0, float("nan"), 0))
+        if share == 0.0:
+            # He never throws here but D1 does. Real occupancy, no placement,
+            # and no line of its own.
+            his_value = float(lg_value.get(cell, loc_mu))
+        occ, plac, points, lg_w, lg_v = terms(cell, share, his_value)
+        row = {
+            "region": cell[0],
+            "count": cell[1],
+            "n": count,
             "share": float(share),
-            "leagueShare": float(lg_share.get((region, bucket), 0.0)),
+            "leagueShare": lg_w,
             "points": float(points),
-            "value": his_value,
-            "leagueValue": float(lg_value.get((region, bucket), np.nan)),
-        })
+            "occupancyPoints": float(occ),
+            "placementPoints": float(plac),
+            "value": float(his_value),
+            "leagueValue": float(lg_v),
+        }
+        if share < min_share or share == 0.0:
+            dropped.append(row)
+        else:
+            rows.append(row)
     rows.sort(key=lambda r: -abs(r["points"]))
 
     # Everything too rare to earn its own line, pooled into one. Dropping those
@@ -359,22 +410,38 @@ def location_decomposition(sub, league, loc_mu, loc_sd, min_share=0.01):
     # score of 10.91: individually negligible, collectively 1.5 points. The card
     # stays short and still adds up, which is the contract the trait table holds
     # itself to as well.
+    #
+    # The three point columns are summed from the per-cell terms, never
+    # recomputed from the pooled shares and values: (W - W*)(V* - mu) over
+    # aggregates is not the sum of its parts, and quietly would not add up.
     if dropped:
-        share = sum(sh for _, sh, _ in dropped)
-        points = sum(-DISPLAY_SPREAD * sh * (v - loc_mu) / loc_sd for _, sh, v in dropped)
+        share = sum(r["share"] for r in dropped)
+        lg_w = sum(r["leagueShare"] for r in dropped)
         rows.append({
             "region": "Everywhere else",
             "count": "all",
-            "n": int(sum(len(g) for g, _, _ in dropped)),
+            "n": int(sum(r["n"] for r in dropped)),
             "share": float(share),
-            "leagueShare": float(sum(
-                lg_share.get((r, b), 0.0)
-                for g, _, _ in dropped
-                for r, b in {(rr, bb) for rr, bb in zip(g["region"], g["bucket"])}
-            )),
-            "points": float(points),
-            "value": float(np.average([v for _, _, v in dropped],
-                                      weights=[sh for _, sh, _ in dropped])),
-            "leagueValue": float("nan"),
+            "leagueShare": float(lg_w),
+            "points": float(sum(r["points"] for r in dropped)),
+            "occupancyPoints": float(sum(r["occupancyPoints"] for r in dropped)),
+            "placementPoints": float(sum(r["placementPoints"] for r in dropped)),
+            # Display only. Share-weighted over exactly the cells pooled here,
+            # so the pair is comparable; falls back to the other side when one
+            # population has no pitches in any of them.
+            "value": _pooled_mean(dropped, "value", "share", fallback_w="leagueShare"),
+            "leagueValue": _pooled_mean(dropped, "leagueValue", "leagueShare",
+                                        fallback_w="share"),
         })
     return rows
+
+
+def _pooled_mean(rows, value_key, weight_key, fallback_w):
+    """Share-weighted mean of one side of the pooled row, falling back to the
+    other side's weights when this side has no pitches in any pooled cell."""
+    w = [r[weight_key] for r in rows]
+    if sum(w) <= 0:
+        w = [r[fallback_w] for r in rows]
+    if sum(w) <= 0:
+        return float("nan")
+    return float(np.average([r[value_key] for r in rows], weights=w))

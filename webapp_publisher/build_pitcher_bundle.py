@@ -125,6 +125,10 @@ def enrich_loc_where(bundle: dict, pages: dict) -> None:
         where = ff.get("locWhere") if ff else None
         if where:
             row["locWhere"] = to_native(where)
+            # The board has to be able to show the same three terms the page
+            # does, and the baseline is not recoverable from the rows.
+            if ff.get("locBaseline") is not None:
+                row["locBaseline"] = to_native(ff["locBaseline"])
 
 
 def build_type_board(pages: dict) -> dict:

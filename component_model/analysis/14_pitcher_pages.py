@@ -96,6 +96,13 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
                 "locWhere": (ar.location_decomposition(
                     sub, state["league_cells"], state["loc_mu"], state["loc_sd"])
                     if tname == "FF" and state.get("league_cells") else None),
+                # The third term of that split: D1's own location mix, which is
+                # the same number for every pitcher and therefore explains none
+                # of the gap between them. One scalar rather than a column, so a
+                # reader cannot mistake it for something he did.
+                "locBaseline": (ar.location_baseline(
+                    state["league_cells"], state["loc_mu"], state["loc_sd"])
+                    if tname == "FF" and state.get("league_cells") else None),
                 # What actually happened to this pitch type, on the same display
                 # scale. None when the type has too few qualifying pitchers to
                 # define a scale, rather than a number resting on nothing.

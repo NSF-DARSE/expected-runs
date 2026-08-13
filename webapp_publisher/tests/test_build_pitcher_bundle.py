@@ -196,7 +196,8 @@ from webapp_publisher.build_pitcher_bundle import enrich_loc_where
 
 def _where_rows():
     return [{"region": "Down and away", "count": "ahead", "n": 41, "share": 0.31,
-             "leagueShare": 0.18, "points": 14.0, "value": -0.004, "leagueValue": -0.002}]
+             "leagueShare": 0.18, "points": 14.0, "occupancyPoints": 9.0,
+             "placementPoints": 4.5, "value": -0.004, "leagueValue": -0.002}]
 
 
 def _where_pages(arsenal):
@@ -233,3 +234,22 @@ def test_loc_where_skips_a_row_with_no_pitcher_file():
     bundle = _where_bundle(pitcher_id=None)
     enrich_loc_where(bundle, _where_pages([{"type": "FF", "locWhere": _where_rows()}]))
     assert "locWhere" not in bundle["staff_board.json"]["pitchers"][0]
+
+
+def test_loc_baseline_rides_along_with_the_rows():
+    """The board card cannot reach the score from the rows alone: the league's
+    own location mix is a term of the split that no row carries.
+    """
+    bundle = _where_bundle()
+    enrich_loc_where(bundle, _where_pages(
+        [{"type": "FF", "locWhere": _where_rows(), "locBaseline": -1.25}]))
+    assert bundle["staff_board.json"]["pitchers"][0]["locBaseline"] == -1.25
+
+
+def test_loc_baseline_is_absent_when_the_bundle_predates_it():
+    """Older pitcher pages have rows and no baseline. Absent rather than null so
+    the card can fall back instead of rendering a broken sum.
+    """
+    bundle = _where_bundle()
+    enrich_loc_where(bundle, _where_pages([{"type": "FF", "locWhere": _where_rows()}]))
+    assert "locBaseline" not in bundle["staff_board.json"]["pitchers"][0]

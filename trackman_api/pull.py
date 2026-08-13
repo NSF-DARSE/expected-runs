@@ -40,6 +40,7 @@ prints counts and gameIDs only, never pitch-level values.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import threading
@@ -124,8 +125,29 @@ def write_game(client: ThreadSafeClient, session: dict, base: str) -> str:
     return game_id
 
 
-def discover_range(client: ThreadSafeClient, start: datetime, end: datetime,
-                   team: str | None) -> dict[str, dict]:
+def manifest_path(base: str, start: datetime, end: datetime, team: str | None) -> str:
+    tag = f"{start:%Y%m%d}_{end:%Y%m%d}" + (f"_{team}" if team else "")
+    return os.path.join(base, "_manifest", f"{tag}.json")
+
+
+def discover_range(client: ThreadSafeClient, base: str, start: datetime,
+                   end: datetime, team: str | None,
+                   rediscover: bool = False) -> dict[str, dict]:
+    """Discover the games in a range, caching the result next to the tree.
+
+    Discovery has a far tighter quota than the data endpoints, and a run that
+    dies partway through the fetch would otherwise have to spend that quota
+    again just to learn what it already knew. The cache makes a resume cost
+    zero discovery calls.
+    """
+    cache = manifest_path(base, start, end, team)
+    if not rediscover and os.path.exists(cache):
+        with open(cache, encoding="utf-8") as fh:
+            sessions = json.load(fh)
+        print(f"discovery manifest reused: {len(sessions)} games from {cache}",
+              flush=True)
+        return sessions
+
     sessions: dict[str, dict] = {}
     for i, (w_from, w_to) in enumerate(windows(start, end)):
         if i:
@@ -136,6 +158,11 @@ def discover_range(client: ThreadSafeClient, start: datetime, end: datetime,
               f"{len(found)} sessions, {len(kept)} to pull", flush=True)
         for s in kept:
             sessions.setdefault(s["gameID"], s)
+    os.makedirs(os.path.dirname(cache), exist_ok=True)
+    tmp = f"{cache}.part"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(sessions, fh)
+    os.replace(tmp, cache)
     return sessions
 
 
@@ -152,6 +179,8 @@ def main() -> None:
                    help="Overall deadline; the run fails loudly when it is hit")
     p.add_argument("--force", action="store_true",
                    help="Re-pull and overwrite games already on disk")
+    p.add_argument("--rediscover", action="store_true",
+                   help="Ignore the cached discovery manifest and re-run discovery")
     p.add_argument("--dry-run", action="store_true", help="Discover and count; write nothing")
     args = p.parse_args()
 
@@ -169,7 +198,8 @@ def main() -> None:
         print(f"pacing: {args.requests_per_hour:.0f} requests/hour "
               f"(~{args.requests_per_hour / 2:.0f} games/hour)", flush=True)
 
-    sessions = discover_range(client, start, end, args.team)
+    sessions = discover_range(client, args.out, start, end, args.team,
+                              rediscover=args.rediscover)
     print(f"\ntotal games discovered: {len(sessions)}", flush=True)
     if args.dry_run:
         return

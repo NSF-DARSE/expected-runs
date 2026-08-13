@@ -1,91 +1,86 @@
-# Baseball Pitch Physical Parameters Against Expected Runs Model
+# Expected Runs: pitch evaluation from TrackMan physics
 
-This project builds an expected-runs based pitch evaluation workflow for baseball TrackMan data. It creates pitch-level run value targets, engineers physical pitch features, trains models on four-seam fastballs, and uses SHAP values to explain pitcher-level performance.
+A pitch-evaluation research project built on college baseball TrackMan data. Every
+pitch is assigned a run-value target from an expected-runs table, and pitcher-level
+scores are built from pitch physics and location rather than from outcomes, so they
+stay readable on the small samples a college season provides.
 
-The current workflow has moved beyond the original run-expectancy scripts. It now includes four-seam fastball dataset creation, Random Forest modeling, SHAP feature impact analysis, normalized pitcher scores, and conference-filtered linear regression SHAP scoring.
+The project reports three scores, all on a 100 +/- 15 scale:
 
-## Project Files
+- **Stuff+** — a Ridge model on release and movement features (velocity, spin,
+  extension, break, and differentials off the pitcher's own fastball).
+- **Location+** — a binned (plate x, plate z) run-value map. A fastball-only score:
+  it is reliable but has no predictive validity on secondary pitches.
+- **Pitching+** — an equal-weight z-score blend of the two. Equal weights beat every
+  fitted alternative we tried.
 
-| File | Description |
-| --- | --- |
-| `Helpers.py` | Helper functions for reconstructing base runner states, creating game-state labels, calculating runs remaining, and computing zero-run probabilities. |
-| `generate_gamestate_summary.py` | Builds an all-year game-state summary from TrackMan CSV files, including expected runs and zero-run probability for each game state. |
-| `target_and_calculated_pipeline.py` | Creates the final pitch-level modeling dataset by adding expected-runs targets and calculated pitch features such as velocity differential, vertical break difference, and horizontal break difference. |
-| `ff_data_set_creation.py` | Filters the final target/calculated dataset to four-seam fastballs, cleans handedness fields, creates binary handedness features, and saves both the full four-seam dataset and the DEL_BLU pitcher-team subset. |
-| `random_forest_modeling.py` | Trains the finalized Random Forest regression model for four-seam fastball target prediction and saves the fitted model file. |
-| `shap_scaling_analysis.py` | Runs Random Forest SHAP analysis for DEL_BLU four-seam fastballs, creates pitch-level SHAP values, saves SHAP summary plots, and produces normalized pitcher scores. |
-| `conference_team_shap_analysis.py` | Filters four-seam data to selected C-USA, Sun Belt, and American Athletic Conference teams, trains a Linear Regression model, and creates DEL_BLU SHAP-based pitcher scores for comparison with coach-style Stuff+ scoring. |
-| `conf_teams.ipynb` | Notebook version of the conference filtering, linear regression modeling, and SHAP comparison workflow. |
+## Start here
 
-## Workflow Overview
+| Document | What it covers |
+|---|---|
+| [`component_model/FRAMEWORK.md`](component_model/FRAMEWORK.md) | Why the approach changed, how the model is structured, and the score design principles. |
+| [`component_model/RESULTS.md`](component_model/RESULTS.md) | Every measured result, including the negative ones, plus the 2026 replication verdicts. |
+| [`component_model/analysis/README.md`](component_model/analysis/README.md) | How to reproduce all of it: setup, run order, and what each script answers. |
 
-1. `Helpers.py` reconstructs runner states, game states, and runs remaining after each pitch.
-2. `generate_gamestate_summary.py` scans TrackMan CSV files and creates a run expectancy table for each count/base/out game state.
-3. `target_and_calculated_pipeline.py` maps expected-runs values back to pitch-level data and calculates the target value for each pitch.
-4. `ff_data_set_creation.py` filters the final dataset to four-seam fastballs and creates model-ready handedness features.
-5. `random_forest_modeling.py` trains the main Random Forest model for expected run change prediction.
-6. `shap_scaling_analysis.py` explains the Random Forest model with SHAP and converts pitcher-level SHAP summaries into normalized scores.
-7. `conference_team_shap_analysis.py` runs a separate conference-team Linear Regression SHAP workflow for comparing DEL_BLU pitchers against selected conference competition.
+## What the evidence says
 
-## Main Outputs
+Findings are held to a replication gate: a result discovered on the 2024→2025
+season pair is not adopted until it survives 2025→2026. `RESULTS.md` records the
+outcome either way.
 
-The workflow supports creation of:
+- Location is a real skill, separate from stuff, and the two are close to
+  orthogonal. Both earn their place on top of a pitcher's own prior results.
+- The models beat the stat line. Scores built with no access to a pitcher's own
+  results out-predict those results as a forecast of next season.
+- Contact quality is not visible in location-blind stuff at this level, and a
+  promising "deployment" component was **refuted** on replication and withdrawn.
+  Both are documented rather than buried.
+- Most of what looks like year-to-year pitcher variation is noise, not skill. A
+  variance decomposition puts measurement noise at ~70% of pitcher-season
+  variance, stable skill at ~24%, and real drift at ~6%. Pitching+ captures
+  about 58% of the stable part.
+- That bounds the work: criterion reliability caps attainable validity near 0.55,
+  and the current stack reaches ~0.39. Precision (sample size, pooling,
+  shrinkage) is a bigger lever than additional features.
 
-- game-state expected-runs summary files
-- final pitch-level target and calculated feature datasets
-- four-seam fastball modeling datasets
-- DEL_BLU four-seam fastball subsets
-- trained Random Forest model files
-- pitch-level SHAP value exports
-- SHAP summary plots
-- pitcher average SHAP tables
-- normalized pitcher scoring tables
-- conference-filtered four-seam datasets
-- conference Linear Regression SHAP pitcher score tables
+## Layout
 
-## Model Features
+| Path | Contents |
+|---|---|
+| `component_model/analysis/` | The analysis suite. `fair_criterion.py` holds all shared math; numbered scripts `01`–`15` each answer one question and import it. `tests/` covers the estimators. |
+| `component_model/portal/` | Arsenal-level grading and the transfer-portal evaluation board. |
+| `python_files/` | Dataset construction: runner-state reconstruction, the game-state expected-runs table, and the pitch-level target pipeline. |
+| `webapp_publisher/` | Publishes the precomputed JSON bundle consumed by the coach-facing web application. |
+| `docs/` | Design specs, plans, and working notes. |
 
-The Random Forest four-seam model uses physical pitch, handedness, and calculated differential features:
+Run `01_fair_criterion_anchors.py` first, every time the source data changes. If its
+output does not match the anchor table in `RESULTS.md`, stop and reconcile before
+trusting anything downstream.
 
-- `SpinRate`
-- `Extension`
-- `HorzBreak`
-- `InducedVertBreak`
-- `EffectiveVelo`
-- `RelHeight`
-- `RelSide`
-- `Is_Left_Handed_Pitcher`
-- `Is_Left_Handed_Batter`
-- `vertbreakdiff`
-- `horzbreakdiff`
-- `velocity_differential`
+## Data
 
-The conference Linear Regression SHAP workflow uses:
+The source data is licensed TrackMan and is **never committed to this repository**.
+No pitch-level values, derived player grades, or licensed documentation belong in
+version control; `.gitignore` enforces this and it should stay that way. Scripts
+locate data through the `STUFFPLUS_DATA` and `STUFFPLUS_WORKDIR` environment
+variables (or `--data` / `--workdir`), both pointing outside the repository.
+Published results in `RESULTS.md` are aggregates only.
 
-- `HorzBreak`
-- `InducedVertBreak`
-- `RelHeight`
-- `RelSide`
-- `velocity_differential`
-- `EffectiveVelo`
-- `SpinRate`
+Anyone reproducing this work needs their own TrackMan license and data access.
 
 ## Requirements
 
-The scripts use Python with the following main packages:
+Python with `pandas`, `numpy`, `scipy`, `scikit-learn`, and `pyarrow`. The legacy
+pipeline additionally uses `shap`, `joblib`, `matplotlib`, and `openpyxl`. Tests run
+under `pytest` from the repository root.
 
-- `pandas`
-- `numpy`
-- `scikit-learn`
-- `shap`
-- `joblib`
-- `matplotlib`
-- `openpyxl`
+## Legacy pipeline
 
-## Notes
+The original workflow trained an unregularized Random Forest on four-seam fastballs
+and explained it with SHAP. It is **superseded**: its pitcher scores were measured at
+the noise floor, meaning they carried no repeatable signal. The scripts remain in
+`python_files/` because the dataset-construction half is still in use, but the Random
+Forest scoring path should not be used for evaluation. Some of those scripts still
+carry absolute local paths and need path arguments to run elsewhere.
 
-Some scripts currently use absolute local paths under `/Users/suma/Downloads/Baseball_Project/`. If this project is run on another machine, update those default paths or pass custom paths into the script functions.
-
-Generated data files, model files, virtual environments, `__pycache__/`, and system files such as `.DS_Store` should not be committed unless they are intentionally part of a release.
-
-Project documentation can be found at: https://NSF-DARSE.github.io/expected-runs
+Project documentation: https://NSF-DARSE.github.io/expected-runs

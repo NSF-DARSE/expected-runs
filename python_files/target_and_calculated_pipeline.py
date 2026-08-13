@@ -20,15 +20,15 @@ REQUIRED_COLS = [
     "PitcherThrows", "PitcherTeam", "Batter", "BatterSide", "BatterTeam",
     "Inning", "Top/Bottom", "Outs", "Balls", "Strikes", "TaggedPitchType",
     "AutoPitchType", "PitchCall", "TaggedHitType", "PlayResult", "OutsOnPlay",
-    "RunsScored", "RunnerOn1B", "RunnerOn2B", "RunnerOn3B", "GameState",
+    "RunsScored", "ExitSpeed", "Angle", "Direction", "Distance", "HangTime",
+    "GameID", "PitchUID", "RunnerOn1B", "RunnerOn2B", "RunnerOn3B", "GameState",
     "RunsRemaining", "ExpectedRuns", "Target", "RelSpeed", "SpinRate",
     "Extension", "HorzBreak", "InducedVertBreak", "SpinAxis", "EffectiveVelo",
     "RelHeight", "RelSide", "FastestPitchType", "MaxRelSpeed",
     "Avg_InducedVertBreak_FastestType", "Avg_HorzBreak_FastestType",
     "Avg_RelSpeed_FastestType", "vertbreakdiff", "horzbreakdiff",
     "velocity_differential", "VertBreak", "PlateLocHeight", "PlateLocSide",
-    "ExitSpeed", "Angle", "Direction", "Distance", "HangTime",
-    "GameID", "PitchUID", "Level", "League"
+    "Level", "League"
 ]
 
 

@@ -312,3 +312,24 @@ def test_secondary_pitch_type_carrying_a_location_decomposition_is_rejected():
     bad["staff_by_type.json"]["types"][0]["type"] = "Slider"
     with pytest.raises(ValueError, match="fastball score only"):
         validate_pitcher_bundle(bad)
+
+
+def test_a_bad_but_real_adjusted_results_value_still_publishes():
+    """Measured on a real bundle, per-type adjusted results run 28.7 to 140.1:
+    the number can rest on under 30 pitches where the fastball board rests on
+    100+, so it spreads much wider. DISPLAY_BAND rejected a legitimate changeup
+    and aborted a whole publish, which is the failure this pins.
+    """
+    good = copy.deepcopy(GOOD)
+    good["staff_by_type.json"]["types"][0]["pitchers"][0]["adjRes"] = 28.7
+    validate_pitcher_bundle(good)  # must not raise
+
+
+def test_an_unscaled_adjusted_results_value_is_still_rejected():
+    """Widening the band must not give up what the band is for: a raw run value
+    (|v| < ~0.2) that never went through to_display.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["staff_by_type.json"]["types"][0]["pitchers"][0]["adjRes"] = -0.031
+    with pytest.raises(ValueError, match="Adj Results"):
+        validate_pitcher_bundle(bad)

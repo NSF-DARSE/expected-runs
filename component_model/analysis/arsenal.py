@@ -292,12 +292,14 @@ def location_decomposition(sub, league, loc_mu, loc_sd, min_share=0.01):
     lg_value = league.groupby(["region", "bucket"])["loc"].mean()
 
     rows = []
+    dropped = []
     n = len(sub)
     for (region, bucket), g in sub.groupby(["region", "bucket"]):
         share = len(g) / n
-        if share < min_share:
-            continue
         his_value = float(g["loc"].mean())
+        if share < min_share:
+            dropped.append((g, share, his_value))
+            continue
         # to_display negates, so a LOWER run value has to come out as POSITIVE
         # points. Dropping this sign was a real bug on `loc` once already.
         points = -DISPLAY_SPREAD * share * (his_value - loc_mu) / loc_sd
@@ -312,4 +314,28 @@ def location_decomposition(sub, league, loc_mu, loc_sd, min_share=0.01):
             "leagueValue": float(lg_value.get((region, bucket), np.nan)),
         })
     rows.sort(key=lambda r: -abs(r["points"]))
+
+    # Everything too rare to earn its own line, pooled into one. Dropping those
+    # cells outright is what made a real pitcher's rows sum to 9.40 against a
+    # score of 10.91: individually negligible, collectively 1.5 points. The card
+    # stays short and still adds up, which is the contract the trait table holds
+    # itself to as well.
+    if dropped:
+        share = sum(sh for _, sh, _ in dropped)
+        points = sum(-DISPLAY_SPREAD * sh * (v - loc_mu) / loc_sd for _, sh, v in dropped)
+        rows.append({
+            "region": "Everywhere else",
+            "count": "all",
+            "n": int(sum(len(g) for g, _, _ in dropped)),
+            "share": float(share),
+            "leagueShare": float(sum(
+                lg_share.get((r, b), 0.0)
+                for g, _, _ in dropped
+                for r, b in {(rr, bb) for rr, bb in zip(g["region"], g["bucket"])}
+            )),
+            "points": float(points),
+            "value": float(np.average([v for _, _, v in dropped],
+                                      weights=[sh for _, sh, _ in dropped])),
+            "leagueValue": float("nan"),
+        })
     return rows

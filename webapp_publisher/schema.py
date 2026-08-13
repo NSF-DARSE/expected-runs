@@ -59,10 +59,10 @@ REQUIRED_ARSENAL_KEYS = {"type", "label", "n", "usage", "stuff", "loc",
 
 # How far the location decomposition may drift from the score it explains before
 # the publish aborts. The rows are an exact algebraic split of the same mean, so
-# any real gap is a bug (a mismatched population, a dropped cell, a lost sign),
-# not rounding. The tolerance covers float error and the small-share cells the
-# decomposition omits on purpose.
-LOC_DECOMP_TOLERANCE = 1.0
+# the only legitimate gap is float error: rare cells are pooled into an
+# "Everywhere else" row rather than discarded. A loose tolerance here would have
+# hidden exactly the bug this caught, where dropped cells cost 1.5 points.
+LOC_DECOMP_TOLERANCE = 0.01
 REQUIRED_PITCH_KEYS = {"d", "t", "x", "z", "c", "g", "f"}
 
 # Plausible-range guard for scores on the 100+/-15 display scale. A raw
@@ -97,6 +97,17 @@ PITCH_GRADE_BAND = (1.0, 250.0)
 # is wide enough that no real pitch aborts a publish and narrow enough that none
 # of those three failures survives it.
 VELO_BAND = (55.0, 110.0)
+
+# Per-type adjusted results spread far wider than the fastball season figure
+# DISPLAY_BAND was drawn for, and for a structural reason rather than a defect:
+# the fastball board averages over 100+ pitches per qualified pitcher, while a
+# pitch-type results number can rest on under 30. Measured on a real bundle the
+# range is 28.7 to 140.1 across types, with per-type medians a sane 74.7 to
+# 103.3, so DISPLAY_BAND would abort a publish over a legitimately bad changeup.
+# The band's real job here is the same as PITCH_GRADE_BAND's: catch a raw run
+# value (|v| < ~0.2) that never went through to_display. Anything above ~0.5
+# does that, and tightness beyond it only costs real publishes.
+ADJRES_BAND = (1.0, 250.0)
 
 
 def _check_display_band(value, band, *, key, field, ptype):
@@ -175,7 +186,7 @@ def validate_pitcher_bundle(files: dict) -> None:
             # to set a results scale. A present value still has to be on the
             # display scale like every other score.
             if r.get("adjRes") is not None:
-                _check_display_band(r["adjRes"], DISPLAY_BAND, key="staff_by_type.json",
+                _check_display_band(r["adjRes"], ADJRES_BAND, key="staff_by_type.json",
                                     field="staff Adj Results", ptype=t["type"])
 
     pitcher_files = [k for k in files if k.startswith("pitchers/")]
@@ -198,6 +209,9 @@ def validate_pitcher_bundle(files: dict) -> None:
                 _check_display_band(a["loc"], DISPLAY_BAND, key=key, field="fastball Location+", ptype=a["type"])
             _check_display_band(a["stuff"], DISPLAY_BAND, key=key, field="arsenal Stuff+", ptype=a["type"])
             _check_velo(a["avgVelo"], key=key, ptype=a["type"])
+            if a.get("adjRes") is not None:
+                _check_display_band(a["adjRes"], ADJRES_BAND, key=key,
+                                    field="arsenal Adj Results", ptype=a["type"])
             if a["type"] == "FF":
                 if not a["locWhere"]:
                     raise ValueError(f"{key} fastball row has no Location+ decomposition")

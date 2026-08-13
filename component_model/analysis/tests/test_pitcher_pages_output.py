@@ -381,3 +381,22 @@ def test_secondary_pitch_rows_carry_no_location_grade():
                                         min_type_pitches=1)
     for r in records:
         assert all(p["l"] is None for p in r["pitches"])
+
+
+def test_rare_cells_are_pooled_rather_than_dropped():
+    """Regression on a real publish failure: cells under the share threshold were
+    discarded, so one pitcher's rows summed to 9.40 against a score of 10.91.
+    Individually negligible, collectively 1.5 points. Pooling them keeps the card
+    short without breaking the promise that the rows add to the score.
+    """
+    import arsenal as ar
+    import pandas as pd
+    rows = [{"PitcherId": 1, "PlateLocSide": -0.7, "PlateLocHeight": 1.8,
+             "BatterSide": "Right", "count12": "0-2", "loc": -0.02} for _ in range(99)]
+    rows.append({"PitcherId": 1, "PlateLocSide": 0.0, "PlateLocHeight": 2.5,
+                 "BatterSide": "Right", "count12": "0-0", "loc": 0.5})
+    df = pd.DataFrame(rows)
+    out = ar.location_decomposition(df, df, 0.0, 0.02, min_share=0.05)
+    assert any(r["region"] == "Everywhere else" for r in out), "the rare cell must be kept"
+    expected = float(ar.to_display(df["loc"].mean(), 0.0, 0.02)) - 100.0
+    assert sum(r["points"] for r in out) == pytest.approx(expected, abs=1e-9)

@@ -3,10 +3,14 @@
 Same job as backfill.py, with the three things a season-scale backfill needs
 that a week-scale one does not:
 
-  * Concurrency. Sequential pulling runs at roughly 10 seconds per game, so a
-    full season (~6.5k games) is an overnight job. The data GETs are the slow
-    part and their quota is far looser than discovery's, so they are issued
-    from a small thread pool.
+  * Concurrency, paced. Sequential pulling runs at roughly 10 seconds per game,
+    so a full season (~6.5k games) is an overnight job; the data GETs are the
+    slow part, so they are issued from a small thread pool. The data endpoints
+    do have an hourly quota, though (measured: an unpaced 12-worker run pulled
+    ~1,600 games, ~3,200 requests, in 27 minutes and then hit a wall of 429s
+    that no per-request backoff could ride out). --requests-per-hour throttles
+    the whole pool to stay under it, which is faster end to end than running
+    flat out and then stalling.
   * An overall deadline. --timeout-hours bounds the whole run, not just each
     request, and exits non-zero when it is hit so an unattended run cannot
     stall silently. Per-request retry stays bounded with exponential backoff
@@ -65,16 +69,45 @@ class Deadline:
         return f"{(self.expires_at - time.time()) / 3600:.1f}h"
 
 
-class ThreadSafeClient(ApiClient):
-    """ApiClient with the token renewal serialized across worker threads."""
+class RateLimiter:
+    """Fixed-interval gate shared by every worker thread.
 
-    def __init__(self, cfg):
+    Not a token bucket: a bucket lets a burst through, and a burst is exactly
+    what trips TrackMan's hourly quota at the start of a run.
+    """
+
+    def __init__(self, per_hour: float):
+        self.interval = 3600.0 / per_hour if per_hour > 0 else 0.0
+        self._lock = threading.Lock()
+        self._next_at = time.monotonic()
+
+    def acquire(self) -> None:
+        if not self.interval:
+            return
+        with self._lock:
+            now = time.monotonic()
+            wait = max(0.0, self._next_at - now)
+            self._next_at = max(now, self._next_at) + self.interval
+        if wait:
+            time.sleep(wait)
+
+
+class ThreadSafeClient(ApiClient):
+    """ApiClient with token renewal serialized and every call rate-limited."""
+
+    def __init__(self, cfg, limiter: RateLimiter | None = None):
         self._token_lock = threading.Lock()
+        self.limiter = limiter
         super().__init__(cfg)
 
     def _headers(self) -> dict:
         with self._token_lock:
             return super()._headers()
+
+    def _request(self, method: str, path: str, **kwargs):
+        if self.limiter is not None:
+            self.limiter.acquire()
+        return super()._request(method, path, **kwargs)
 
 
 def write_game(client: ThreadSafeClient, session: dict, base: str) -> str:
@@ -113,6 +146,8 @@ def main() -> None:
     p.add_argument("--out", required=True, help="Output base directory (local storage)")
     p.add_argument("--team", help="Only games involving this team shortName (e.g. DEL_BLU)")
     p.add_argument("--workers", type=int, default=8, help="Concurrent game fetches")
+    p.add_argument("--requests-per-hour", type=float, default=4000.0,
+                   help="Global request ceiling; two requests per game. 0 disables.")
     p.add_argument("--timeout-hours", type=float, default=12.0,
                    help="Overall deadline; the run fails loudly when it is hit")
     p.add_argument("--force", action="store_true",
@@ -128,7 +163,11 @@ def main() -> None:
         raise SystemExit("--workers must be >= 1")
 
     deadline = Deadline(args.timeout_hours)
-    client = ThreadSafeClient(load_config())
+    limiter = RateLimiter(args.requests_per_hour)
+    client = ThreadSafeClient(load_config(), limiter)
+    if limiter.interval:
+        print(f"pacing: {args.requests_per_hour:.0f} requests/hour "
+              f"(~{args.requests_per_hour / 2:.0f} games/hour)", flush=True)
 
     sessions = discover_range(client, start, end, args.team)
     print(f"\ntotal games discovered: {len(sessions)}", flush=True)

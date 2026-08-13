@@ -22,6 +22,14 @@ GOOD = {
         "pitches": [{"d": "2026-03-15", "t": "FF", "x": -0.42, "z": 2.31,
                      "c": "0-2", "g": 131.0, "f": [2350.0]}],
     },
+    "staff_by_type.json": {
+        "types": [
+            {"type": "FF", "label": "Fastball", "nQualified": 400, "sampleFloor": 100,
+             "pitchers": [{"pitcherId": 1000123, "name": "Test-Pitcher, Alpha",
+                          "hand": "R", "n": 412, "usage": 1.0, "stuff": 124.0,
+                          "avgVelo": 93.1, "aboveFloor": True}]},
+        ],
+    },
 }
 
 
@@ -237,4 +245,39 @@ def test_non_positive_display_sd_is_rejected():
     bad = copy.deepcopy(GOOD)
     bad["model_artifacts.json"]["byPitchType"]["FF"]["displaySd"] = 0.0
     with pytest.raises(ValueError, match="displaySd"):
+        validate_pitcher_bundle(bad)
+
+
+def test_type_board_entry_with_no_pitchers_is_rejected():
+    """An empty pitchers list for a type would render a staff board section with
+    nothing in it; the regroup upstream should never produce this, so a bundle
+    that has it is a build-time bug, not a legitimately quiet pitch type.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["staff_by_type.json"]["types"][0]["pitchers"] = []
+    with pytest.raises(ValueError, match="no pitchers for"):
+        validate_pitcher_bundle(bad)
+
+
+def test_type_board_entry_missing_from_model_artifacts_is_rejected():
+    """staff_by_type's per-type scale (nQualified, sampleFloor, displaySd) lives
+    in model_artifacts.json's byPitchType, keyed by the same type string. A type
+    on the board with no matching artifact would render the same broken defaults
+    the arsenal check above guards against: a sample floor of 0 and a tooltip
+    claiming "Fewer than 0 pitches this season".
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["staff_by_type.json"]["types"][0]["type"] = "SL"
+    with pytest.raises(ValueError, match="SL"):
+        validate_pitcher_bundle(bad)
+
+
+def test_unscaled_staff_stuff_value_is_rejected():
+    """Regression guard mirroring the arsenal `stuff` check: staff_by_type rows
+    carry the same 100+/-15 display Stuff+ and are just as exposed to a raw
+    expected-run value (~0.00x, lower = better) shipping unscaled onto the board.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["staff_by_type.json"]["types"][0]["pitchers"][0]["stuff"] = -0.0231
+    with pytest.raises(ValueError, match="Stuff"):
         validate_pitcher_bundle(bad)

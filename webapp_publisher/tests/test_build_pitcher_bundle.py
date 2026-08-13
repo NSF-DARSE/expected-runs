@@ -2,7 +2,7 @@ import copy
 
 import pytest
 
-from webapp_publisher.build_pitcher_bundle import build_pitcher_bundle, pitcher_index
+from webapp_publisher.build_pitcher_bundle import build_pitcher_bundle, build_type_board, pitcher_index
 
 PAGES = {
     "team": "DEL_BLU",
@@ -29,7 +29,7 @@ PAGES = {
 def test_bundle_has_one_file_per_pitcher_plus_the_shared_files():
     out = build_pitcher_bundle(PAGES)
     assert set(out) == {"location_maps.json", "model_artifacts.json",
-                        "pitchers/1000123.json"}
+                        "pitchers/1000123.json", "staff_by_type.json"}
 
 
 def test_pitcher_file_is_keyed_by_trackman_id_not_a_positional_index():
@@ -108,6 +108,19 @@ def test_stamp_leaves_none_when_no_pitcher_file():
     stamp_pitcher_ids(bundle, pages)
     rows = {r["name"]: r["pitcherId"] for r in bundle["staff_board.json"]["pitchers"]}
     assert rows["Test-Pitcher, Charlie"] is None
+
+
+def test_type_board_regroups_arsenal_rows_by_pitch_type():
+    """build_type_board pivots the pitcher pages from by-pitcher to by-type with
+    no new modeling, so the arsenal row a pitcher already has for a pitch type
+    must show up unchanged under that type's entry, and every pitch type present
+    in the arsenal must produce its own board section.
+    """
+    board = build_type_board(PAGES)
+    assert [t["type"] for t in board["types"]] == ["FF"]
+    ff_pitchers = board["types"][0]["pitchers"]
+    assert [p["pitcherId"] for p in ff_pitchers] == [1000123]
+    assert ff_pitchers[0]["stuff"] == 124.0
 
 
 def test_stamp_rejects_duplicate_names():

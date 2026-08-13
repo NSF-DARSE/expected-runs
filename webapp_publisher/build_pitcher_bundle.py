@@ -61,6 +61,48 @@ def stamp_pitcher_ids(bundle: dict, pages: dict) -> None:
         row["pitcherId"] = by_name.get(row["name"])
 
 
+def build_type_board(pages: dict) -> dict:
+    """Per-pitch-type staff table, regrouped from the pitcher pages.
+
+    No new modeling: 14_pitcher_pages already fits every pitch type with its own
+    scale and its own qualified population, so this is the arsenal rows pivoted
+    from by-pitcher to by-type.
+
+    Deliberately carries Stuff+ and nothing else. Location+ is a fastball score,
+    and Pitching+ is a blend that includes it, so neither exists per type; a
+    board that showed those columns for a slider would be inventing them. Adj
+    Results is computed over four-seams only upstream. `nQualified` rides along
+    per type because the scales rest on very different populations (four-seam on
+    thousands, splitter on tens), and a grade is not readable without it.
+    """
+    artifacts = pages["model"]["byPitchType"]
+    by_type: dict[str, list[dict]] = {}
+    for p in pages["pitchers"]:
+        for a in p["arsenal"]:
+            by_type.setdefault(a["type"], []).append({
+                "pitcherId": int(p["pitcherId"]),
+                "name": p["name"],
+                "hand": p["hand"],
+                "n": a["n"],
+                "usage": a["usage"],
+                "stuff": a["stuff"],
+                "avgVelo": a.get("avgVelo"),
+                "aboveFloor": a["aboveFloor"],
+            })
+    return to_native({
+        "types": [
+            {
+                "type": t,
+                "label": PITCH_TYPE_LABELS.get(t, t),
+                "nQualified": artifacts.get(t, {}).get("nQualified"),
+                "sampleFloor": artifacts.get(t, {}).get("sampleFloor"),
+                "pitchers": sorted(rows, key=lambda r: r["stuff"], reverse=True),
+            }
+            for t, rows in sorted(by_type.items(), key=lambda kv: -len(kv[1]))
+        ],
+    })
+
+
 def build_pitcher_bundle(pages: dict) -> dict[str, dict]:
     model = dict(pages["model"])
     missing = [f for f in model["featureOrder"] if f not in FEATURE_LABELS]
@@ -84,4 +126,5 @@ def build_pitcher_bundle(pages: dict) -> dict[str, dict]:
             "pitches": p["pitches"],
         })
         files[f"pitchers/{p['pitcherId']}.json"] = body
+    files["staff_by_type.json"] = build_type_board(pages)
     return files

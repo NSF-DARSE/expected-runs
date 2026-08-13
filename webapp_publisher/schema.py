@@ -73,11 +73,16 @@ def _check_display_band(value, band, *, key, field, ptype):
 
 
 def _check_velo(value, *, key, ptype):
-    """Raise if `value` is not a plausible average release speed in mph. NaN is
-    called out separately: a mean over an empty or all-null RelSpeed slice comes
-    back NaN, which fails every comparison silently and would otherwise reach the
-    page as "NaN mph".
+    """Raise if `value` is not a plausible average release speed in mph.
+
+    None is allowed and means the source extract carried no RelSpeed column; the
+    page renders the row without a velocity rather than inventing one. What is
+    not allowed is a present-but-wrong value. NaN is called out separately: a
+    mean over an all-null slice comes back NaN, which fails every comparison
+    silently and would otherwise reach the page as "NaN mph".
     """
+    if value is None:
+        return
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         raise ValueError(f"{key} avgVelo for {ptype} is not numeric: {value!r}")
     if value != value:
@@ -94,7 +99,7 @@ def validate_pitcher_bundle(files: dict) -> None:
     """Fail loudly before upload. Mirrors validate_bundle's style: plain
     ValueErrors naming the offending file and key.
     """
-    for name in ("location_maps.json", "model_artifacts.json"):
+    for name in ("location_maps.json", "model_artifacts.json", "staff_by_type.json"):
         if name not in files:
             raise ValueError(f"pitcher bundle missing {name}")
 
@@ -115,6 +120,15 @@ def validate_pitcher_bundle(files: dict) -> None:
                 raise ValueError(f"{tname}.{key} feature array is {len(m[key])}, expected {n_feats}")
         if m["displaySd"] <= 0:
             raise ValueError(f"{tname} displaySd must be positive, got {m['displaySd']}")
+
+    for t in files["staff_by_type.json"]["types"]:
+        if not t["pitchers"]:
+            raise ValueError(f"staff_by_type has no pitchers for {t['type']}")
+        if t["type"] not in files["model_artifacts.json"]["byPitchType"]:
+            raise ValueError(f"staff_by_type has pitch type {t['type']!r} with no model artifact")
+        for r in t["pitchers"]:
+            _check_display_band(r["stuff"], DISPLAY_BAND, key="staff_by_type.json",
+                                field="staff Stuff+", ptype=t["type"])
 
     pitcher_files = [k for k in files if k.startswith("pitchers/")]
     if not pitcher_files:

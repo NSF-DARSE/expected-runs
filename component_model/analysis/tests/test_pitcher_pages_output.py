@@ -105,18 +105,23 @@ def test_average_velocity_covers_the_same_pitches_as_the_row_grade():
         assert row["n"] == 3
 
 
-def test_an_extract_without_relspeed_fails_with_the_fix_in_the_message():
+def test_an_extract_without_relspeed_publishes_without_a_velocity():
     """The real source extract is a trimmed subset of the pipeline's output and
     the trim in use through 2026-08 drops RelSpeed, so this is the state of the
-    data on disk today, not a hypothetical. A bare KeyError from a mean() deep in
-    the loop does not tell anyone the extract is the problem.
+    data on disk today, not a hypothetical.
+
+    A missing display field must not block a publish. The page already renders a
+    row with no velocity; what must never happen is a fabricated number, so the
+    field is None rather than 0 or a guess.
     """
     mod = _load_pages_module()
     feats, fitted = _fitted()
     fitted["pitches"] = fitted["pitches"].drop(columns=["RelSpeed"])
-    with pytest.raises(KeyError, match="Regenerate the extract"):
-        mod.build_pitcher_records({"FF": fitted}, feats, floor_n=1, asof="2026-03-10",
-                                  min_type_pitches=1)
+    records = mod.build_pitcher_records({"FF": fitted}, feats, floor_n=1, asof="2026-03-10",
+                                        min_type_pitches=1)
+    assert records, "a missing velocity must not drop the pitcher entirely"
+    for r in records:
+        assert r["arsenal"][0]["avgVelo"] is None
 
 
 def test_average_velocity_is_not_a_graded_trait():

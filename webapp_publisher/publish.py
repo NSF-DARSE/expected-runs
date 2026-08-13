@@ -10,7 +10,8 @@ import pandas as pd
 
 from webapp_publisher.build_bundle import build_bundle, to_native
 from webapp_publisher.build_pitcher_bundle import (
-    build_pitcher_bundle, enrich_stuff_attr_detail, pitcher_index, stamp_pitcher_ids,
+    build_pitcher_bundle, enrich_loc_where, enrich_stuff_attr_detail, pitcher_index,
+    stamp_pitcher_ids,
 )
 from webapp_publisher.schema import validate_bundle, validate_pitcher_bundle
 from webapp_publisher.upload import upload_bundle
@@ -133,6 +134,7 @@ def main() -> int:
     bundle["manifest.json"]["pitchers"] = pitcher_index(pages)
     stamp_pitcher_ids(bundle, pages)
     enrich_stuff_attr_detail(bundle, pages)
+    enrich_loc_where(bundle, pages)
     bundle.update(pitcher_files)
     validate_bundle(bundle)
 

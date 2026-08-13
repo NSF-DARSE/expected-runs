@@ -103,6 +103,30 @@ def enrich_stuff_attr_detail(bundle: dict, pages: dict) -> None:
         row["stuffAttrDetail"] = to_native(detail)
 
 
+def enrich_loc_where(bundle: dict, pages: dict) -> None:
+    """Attach the fastball Location+ region decomposition to each staff-board row.
+
+    The board and the pitcher page show the same Location+ number, so they should
+    be able to answer "why" the same way. The rows are copied whole rather than
+    pre-truncated to the few the hover card has room for: the card can then show
+    its top handful AND an honest remainder line, instead of listing four rows
+    that quietly do not add up to the score above them.
+
+    Absent (not null) when the pitcher has no FF arsenal row or the bundle
+    predates locWhere, which is what lets the card fall back to the descriptive
+    zone/heart lines rather than rendering an empty breakdown.
+
+    Requires stamp_pitcher_ids to have already run.
+    """
+    pitchers_by_id = {int(p["pitcherId"]): p for p in pages["pitchers"]}
+    for row in bundle["staff_board.json"]["pitchers"]:
+        pitcher = pitchers_by_id.get(row["pitcherId"]) if row["pitcherId"] is not None else None
+        ff = next((a for a in pitcher["arsenal"] if a["type"] == "FF"), None) if pitcher else None
+        where = ff.get("locWhere") if ff else None
+        if where:
+            row["locWhere"] = to_native(where)
+
+
 def build_type_board(pages: dict) -> dict:
     """Per-pitch-type staff table, regrouped from the pitcher pages.
 

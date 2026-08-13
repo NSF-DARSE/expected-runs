@@ -189,3 +189,47 @@ def test_stamp_rejects_duplicate_names():
                           {"pitcherId": 1000199, "name": "Test-Pitcher, Alpha", "hand": "L"}]}
     with pytest.raises(ValueError, match="more than one pitcher file"):
         stamp_pitcher_ids(_bundle(["Test-Pitcher, Alpha"]), pages)
+
+
+from webapp_publisher.build_pitcher_bundle import enrich_loc_where
+
+
+def _where_rows():
+    return [{"region": "Down and away", "count": "ahead", "n": 41, "share": 0.31,
+             "leagueShare": 0.18, "points": 14.0, "value": -0.004, "leagueValue": -0.002}]
+
+
+def _where_pages(arsenal):
+    return {"pitchers": [{"pitcherId": 1000101, "name": "Test-Pitcher, Alpha",
+                          "hand": "R", "arsenal": arsenal}]}
+
+
+def _where_bundle(pitcher_id=1000101):
+    return {"staff_board.json": {"pitchers": [
+        {"name": "Test-Pitcher, Alpha", "pitcherId": pitcher_id}]}}
+
+
+def test_loc_where_is_copied_whole_from_the_fastball_row():
+    """The board card shows a few rows plus a remainder, so it needs every row,
+    not a pre-truncated top slice: a card that lists four rows and no remainder
+    silently disagrees with the score printed beside it.
+    """
+    bundle = _where_bundle()
+    enrich_loc_where(bundle, _where_pages([{"type": "FF", "locWhere": _where_rows()}]))
+    assert bundle["staff_board.json"]["pitchers"][0]["locWhere"] == _where_rows()
+
+
+def test_loc_where_is_absent_rather_than_null_when_there_is_nothing_to_attach():
+    """Absent lets the card fall back to its descriptive lines. A null or an
+    empty list would render as a breakdown with no rows in it.
+    """
+    for arsenal in ([{"type": "SL", "locWhere": None}], [{"type": "FF", "locWhere": None}], []):
+        bundle = _where_bundle()
+        enrich_loc_where(bundle, _where_pages(arsenal))
+        assert "locWhere" not in bundle["staff_board.json"]["pitchers"][0]
+
+
+def test_loc_where_skips_a_row_with_no_pitcher_file():
+    bundle = _where_bundle(pitcher_id=None)
+    enrich_loc_where(bundle, _where_pages([{"type": "FF", "locWhere": _where_rows()}]))
+    assert "locWhere" not in bundle["staff_board.json"]["pitchers"][0]

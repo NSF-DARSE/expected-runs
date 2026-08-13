@@ -295,12 +295,25 @@ def location_decomposition(sub, league, loc_mu, loc_sd, min_share=0.01):
     additively, so each cell's points are exact and they sum to his score minus
     100. `sub` is his pitches, `league` every pitch of that type this season.
 
-    Note what this decomposition is NOT. The location map values a spot the same
-    way for everyone, so at this grain the pitcher-specific part is almost
-    entirely OCCUPANCY: his points come from being in a cell more or less often
-    than the field, not from the cell being worth more to him. That is why each
-    row reports both shares. What is left over is where he sits inside the cell,
-    reported as his value against the league's for the same cell.
+    Note what this decomposition is NOT. A row's points are the FULL term,
+    share x (his value - the scale's zero), which mixes three things that a
+    reader will assume are separated and are not:
+
+      w(v - mu) = (w - w*)(v* - mu)   occupancy: he is here more, or less
+                + w(v - v*)           placement: where he sits INSIDE the cell
+                + w*(v* - mu)         the league's own mix, common to everyone
+
+    It was written on the assumption that occupancy dominates at this grain,
+    since the map prices a square the same for everyone. Measured on a real
+    staff that is backwards: occupancy correlates 0.40 with Location+ and
+    placement 0.82. The regions are coarse enough ("off the plate" runs from
+    just-missing to nowhere-near) that the spread inside one is larger than the
+    spread between pitchers' region mixes.
+
+    Emitting the three terms separately needs a league value for the pooled
+    rare-cell row, which is np.nan today, so the split cannot be completed
+    downstream either. Until that lands, do not let a caller present these
+    points as occupancy.
     """
     def cells(df):
         s = _side_relative(df["PlateLocSide"].values, df["BatterSide"].values)

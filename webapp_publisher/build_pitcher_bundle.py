@@ -61,6 +61,48 @@ def stamp_pitcher_ids(bundle: dict, pages: dict) -> None:
         row["pitcherId"] = by_name.get(row["name"])
 
 
+def enrich_stuff_attr_detail(bundle: dict, pages: dict) -> None:
+    """Attach each staff-board Stuff+ trait's raw value and percentile, sourced
+    from the pitcher's FF arsenal row, so the hover card can show more than bare
+    points.
+
+    08_staff_scores.py (upstream of stuffAttr/stuffAttrNoHand) lowercases every
+    feature name; 14_pitcher_pages.py (upstream of model.featureOrder and the
+    arsenal's typical/percentiles) keeps canonical casing (EffectiveVelo, not
+    effectivevelo). A case-sensitive join would null out every trait, so this
+    matches case-insensitively.
+
+    Even case-insensitively, a name can still fail to match -- a real naming
+    drift between the two scripts, not just casing. That is not a reason to
+    guess which feature was meant or to drop the points row that already shipped
+    from 08_staff_scores: the row keeps its points, value and percentile come
+    back null, and a line is printed so whoever runs publish notices instead of
+    the gap sitting quiet on the page forever.
+
+    Requires stamp_pitcher_ids to have already run, since it reads row["pitcherId"].
+    """
+    order = pages["model"]["featureOrder"]
+    index_by_lower = {f.lower(): i for i, f in enumerate(order)}
+    pitchers_by_id = {int(p["pitcherId"]): p for p in pages["pitchers"]}
+
+    for row in bundle["staff_board.json"]["pitchers"]:
+        names = {f for f, _ in row["stuffAttr"]} | {f for f, _ in row["stuffAttrNoHand"]}
+        pitcher = pitchers_by_id.get(row["pitcherId"]) if row["pitcherId"] is not None else None
+        ff = next((a for a in pitcher["arsenal"] if a["type"] == "FF"), None) if pitcher else None
+
+        detail: dict[str, dict] = {}
+        for name in names:
+            idx = index_by_lower.get(name.lower())
+            if ff is not None and idx is not None:
+                detail[name] = {"value": ff["typical"][idx], "percentile": ff["percentiles"][idx]}
+            else:
+                if ff is not None and idx is None:
+                    print(f"stuffAttr feature {name!r} on {row['name']!r} has no match in "
+                          f"model.featureOrder; shipping its points with no value/percentile")
+                detail[name] = {"value": None, "percentile": None}
+        row["stuffAttrDetail"] = to_native(detail)
+
+
 def build_type_board(pages: dict) -> dict:
     """Per-pitch-type staff table, regrouped from the pitcher pages.
 
@@ -68,12 +110,18 @@ def build_type_board(pages: dict) -> dict:
     scale and its own qualified population, so this is the arsenal rows pivoted
     from by-pitcher to by-type.
 
-    Deliberately carries Stuff+ and nothing else. Location+ is a fastball score,
-    and Pitching+ is a blend that includes it, so neither exists per type; a
-    board that showed those columns for a slider would be inventing them. Adj
-    Results is computed over four-seams only upstream. `nQualified` rides along
-    per type because the scales rest on very different populations (four-seam on
-    thousands, splitter on tens), and a grade is not readable without it.
+    Carries Stuff+ and adjusted results, and deliberately not Location+ or
+    Pitching+. Location+ is a fastball score by a settled decision (reliable on
+    secondaries but with no predictive validity there), and Pitching+ is a blend
+    that includes it, so a board showing either for a slider would be inventing
+    it. Adjusted results is different in kind: it describes what happened with
+    luck, defense and opponent quality removed, and a description does not have
+    to predict next season to be true. It is None for a type with too few
+    qualifying pitchers to set a scale.
+
+    `nQualified` rides along per type because the scales rest on very different
+    populations (four-seam on thousands, splitter on tens), and a grade is not
+    readable without it.
     """
     artifacts = pages["model"]["byPitchType"]
     by_type: dict[str, list[dict]] = {}
@@ -86,6 +134,7 @@ def build_type_board(pages: dict) -> dict:
                 "n": a["n"],
                 "usage": a["usage"],
                 "stuff": a["stuff"],
+                "adjRes": a.get("adjRes"),
                 "avgVelo": a.get("avgVelo"),
                 "aboveFloor": a["aboveFloor"],
             })

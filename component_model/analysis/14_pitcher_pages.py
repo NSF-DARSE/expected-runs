@@ -96,6 +96,13 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
                 "locWhere": (ar.location_decomposition(sub, state["pitches"],
                                                        state["loc_mu"], state["loc_sd"])
                              if tname == "FF" else None),
+                # What actually happened to this pitch type, on the same display
+                # scale. None when the type has too few qualifying pitchers to
+                # define a scale, rather than a number resting on nothing.
+                "adjRes": (float(ar.to_display(sub["adjT"].mean(),
+                                               state["adj_mu"], state["adj_sd"]))
+                           if state.get("adj_sd") and "adjT" in sub.columns
+                           and sub["adjT"].notna().any() else None),
                 "aboveFloor": bool(len(sub) >= floor_n),
                 "typical": [float(v) for v in sub[feats].mean().values],
                 # Percentile of each of his typical trait values against the
@@ -111,13 +118,22 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
                 outings.append({"date": str(o["date"]), "type": tname,
                                 "n": int(o["n"]), "stuff": float(o["stuff"])})
             grades = ar.to_display(sub["ridge_pred"].values, mu, sd)
+            # Per-pitch Location+, through the SAME transform as the season
+            # number, per the one-scale rule in arsenal.py: a second scale
+            # calibrated on single pitches would make a pitch and its season
+            # average incomparable. Like the Stuff+ grade `g`, it spreads much
+            # wider than the season figure, because the scale's moments come
+            # from pitcher means. Fastball only, since Location+ is.
+            loc_grades = (ar.to_display(sub["loc"].values, state["loc_mu"], state["loc_sd"])
+                          if tname == "FF" else [None] * len(sub))
             dates = pd.to_datetime(sub["Date"]).dt.strftime("%Y-%m-%d").values
-            for (_, p), g, d in zip(sub.iterrows(), grades, dates):
+            for (_, p), g, lg, d in zip(sub.iterrows(), grades, loc_grades, dates):
                 pitch_rows.append({
                     "d": str(d), "t": tname,
                     "x": round(float(p["PlateLocSide"]), 3),
                     "z": round(float(p["PlateLocHeight"]), 3),
                     "c": str(p["count12"]), "g": float(g),
+                    "l": None if lg is None else float(lg),
                     "f": [float(p[f]) for f in feats],
                 })
         arsenal_rows.sort(key=lambda r: -r["usage"])
@@ -233,6 +249,10 @@ def main() -> int:
     args = fc.paths()
     pit = fc.load_pitches(args)
     fc.add_xt(pit)
+    # Needed for per-type adjusted results: xT with the league mean and a shrunk
+    # batter effect removed, so the column reflects the pitcher rather than who
+    # he happened to face.
+    fc.add_adjusted(pit)
     fc.add_count_cols(pit)
 
     fitted = {}

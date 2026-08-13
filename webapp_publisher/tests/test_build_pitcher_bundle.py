@@ -123,6 +123,65 @@ def test_type_board_regroups_arsenal_rows_by_pitch_type():
     assert ff_pitchers[0]["stuff"] == 124.0
 
 
+from webapp_publisher.build_pitcher_bundle import enrich_stuff_attr_detail
+
+
+def _detail_pages():
+    return {
+        "model": {"featureOrder": ["SpinRate", "EffectiveVelo"]},
+        "pitchers": [{
+            "pitcherId": 1000101, "name": "Test-Pitcher, Alpha", "hand": "R",
+            "arsenal": [{"type": "FF", "typical": [2350.0, 91.2], "percentiles": [78, 55]}],
+        }],
+    }
+
+
+def _detail_bundle(names, pitcher_id):
+    return {"staff_board.json": {"pitchers": [{
+        "name": "Test-Pitcher, Alpha", "pitcherId": pitcher_id,
+        "stuffAttr": [(n, 1.0) for n in names],
+        "stuffAttrNoHand": [(n, 1.0) for n in names],
+    }]}}
+
+
+def test_enrich_matches_feature_names_case_insensitively():
+    """08_staff_scores lowercases every stuffAttr name (effectivevelo) while
+    model.featureOrder keeps canonical casing (EffectiveVelo); a case-sensitive
+    join would null out every real trait on the board.
+    """
+    bundle = _detail_bundle(["spinrate", "effectivevelo"], pitcher_id=1000101)
+    enrich_stuff_attr_detail(bundle, _detail_pages())
+    detail = bundle["staff_board.json"]["pitchers"][0]["stuffAttrDetail"]
+    assert detail["spinrate"] == {"value": 2350.0, "percentile": 78}
+    assert detail["effectivevelo"] == {"value": 91.2, "percentile": 55}
+
+
+def test_enrich_leaves_value_and_percentile_null_for_an_unmatched_feature(capsys):
+    """A stuffAttr name that matches nothing in model.featureOrder, even after
+    lowercasing, is a real naming drift between the two upstream scripts. The
+    points already shipped from 08_staff_scores must not be dropped or guessed
+    at, so the row keeps them with a null value/percentile, and a message is
+    printed so the drift does not go unnoticed.
+    """
+    bundle = _detail_bundle(["spinrate", "not_a_real_feature"], pitcher_id=1000101)
+    enrich_stuff_attr_detail(bundle, _detail_pages())
+    detail = bundle["staff_board.json"]["pitchers"][0]["stuffAttrDetail"]
+    assert detail["not_a_real_feature"] == {"value": None, "percentile": None}
+    assert detail["spinrate"] == {"value": 2350.0, "percentile": 78}
+    assert "not_a_real_feature" in capsys.readouterr().out
+
+
+def test_enrich_leaves_everything_null_when_the_row_has_no_pitcher_file():
+    """A board row with no matching pitcher file (stamp_pitcher_ids leaves
+    pitcherId None) must still validate and ship; the trait rows just carry no
+    value or percentile.
+    """
+    bundle = _detail_bundle(["spinrate"], pitcher_id=None)
+    enrich_stuff_attr_detail(bundle, _detail_pages())
+    detail = bundle["staff_board.json"]["pitchers"][0]["stuffAttrDetail"]
+    assert detail["spinrate"] == {"value": None, "percentile": None}
+
+
 def test_stamp_rejects_duplicate_names():
     # Two pitcher files claiming one board name means the name join is unsafe and
     # a coach could be routed to the wrong player. Fail loudly rather than pick one.

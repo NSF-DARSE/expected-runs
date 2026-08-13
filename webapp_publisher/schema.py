@@ -1,7 +1,40 @@
 """Lightweight bundle validation — fail loudly before upload."""
 REQUIRED_ROW_KEYS = {"id","name","hand","ff","stuff","loc","adjres","pitch",
                      "whiff","zone","heart","meanHeight","locFlag","stuffAttr",
-                     "stuffNoHand","pitchNoHand","stuffAttrNoHand","pitcherId"}
+                     "stuffNoHand","pitchNoHand","stuffAttrNoHand","pitcherId",
+                     "stuffAttrDetail"}
+
+
+def _check_stuff_attr_detail(row: dict) -> None:
+    """stuffAttrDetail carries one value/percentile pair per feature named in
+    stuffAttr or stuffAttrNoHand. A feature in one of those lists with no entry
+    here would mean its points shipped with nothing to back them up; a value
+    present without its percentile (or the reverse) means the join that built
+    the pair only half-ran, which is a bug in the enrichment step, not a real
+    "no data" case -- the real "no data" case (no pitcher file, or the feature
+    name did not match model.featureOrder) always nulls both together. A
+    percentile outside 0-100 is the same reference-population failure the
+    arsenal percentile check above guards against.
+    """
+    detail = row["stuffAttrDetail"]
+    names = {f for f, _ in row["stuffAttr"]} | {f for f, _ in row["stuffAttrNoHand"]}
+    missing = names - set(detail)
+    if missing:
+        raise ValueError(f"pitcher row {row.get('name')} stuffAttrDetail missing {missing}")
+    for name, d in detail.items():
+        has_value = d["value"] is not None
+        has_pct = d["percentile"] is not None
+        if has_value != has_pct:
+            raise ValueError(
+                f"pitcher row {row.get('name')} stuffAttrDetail[{name!r}] has a value with no "
+                f"percentile or a percentile with no value; they should always be null together"
+            )
+        if has_pct and not 0 <= d["percentile"] <= 100:
+            raise ValueError(
+                f"pitcher row {row.get('name')} stuffAttrDetail[{name!r}] percentile "
+                f"{d['percentile']} is outside 0-100"
+            )
+
 
 def validate_bundle(bundle: dict) -> None:
     m = bundle["manifest.json"]
@@ -17,6 +50,7 @@ def validate_bundle(bundle: dict) -> None:
             raise ValueError(f"pitcher row {r.get('name')} missing {missing}")
         if r["locFlag"] not in ("", "caution", "small sample"):
             raise ValueError(f"bad locFlag {r['locFlag']}")
+        _check_stuff_attr_detail(r)
 
 
 REQUIRED_ARSENAL_KEYS = {"type", "label", "n", "usage", "stuff", "loc",
@@ -137,6 +171,12 @@ def validate_pitcher_bundle(files: dict) -> None:
         for r in t["pitchers"]:
             _check_display_band(r["stuff"], DISPLAY_BAND, key="staff_by_type.json",
                                 field="staff Stuff+", ptype=t["type"])
+            # None is legitimate: a type can lack the qualifying pitchers needed
+            # to set a results scale. A present value still has to be on the
+            # display scale like every other score.
+            if r.get("adjRes") is not None:
+                _check_display_band(r["adjRes"], DISPLAY_BAND, key="staff_by_type.json",
+                                    field="staff Adj Results", ptype=t["type"])
 
     pitcher_files = [k for k in files if k.startswith("pitchers/")]
     if not pitcher_files:

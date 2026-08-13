@@ -168,6 +168,24 @@ def fit_type(pit: pd.DataFrame, tags: set[str] | None, floor_n: int, fc_module, 
     per_pitcher = season.groupby("PitcherId")["ridge_pred"].agg(["size", "mean"])
     mu, sd = display_scale(per_pitcher["mean"].values, (per_pitcher["size"] >= floor_n).values)
 
+    # Adjusted results for THIS pitch type, scaled on this type's own qualified
+    # population, exactly as Stuff+ is. Legitimate off the fastball in a way
+    # Location+ is not: adjT describes what happened to the pitch with luck,
+    # defense and opponent quality removed, and a description does not need to
+    # predict next season to be true. Read the number with its pitch count,
+    # though: script 09 measured the criterion's own year-over-year reliability
+    # at 0.304 for four-seams against 0.174 slider and 0.181 changeup.
+    adj_mu = adj_sd = None
+    if "adjT" in season.columns and season["adjT"].notna().any():
+        per_adj = season.groupby("PitcherId")["adjT"].agg(["size", "mean"])
+        try:
+            adj_mu, adj_sd = display_scale(per_adj["mean"].values,
+                                           (per_adj["size"] >= floor_n).values)
+        except ValueError:
+            # Too few qualifying pitchers to define a scale for this type. The
+            # type still grades on Stuff+; it just carries no results column.
+            adj_mu = adj_sd = None
+
     scaler = model.named_steps["standardscaler"]
     coef = model.named_steps["ridge"].coef_
     feats = fc_module.FEATS
@@ -185,6 +203,8 @@ def fit_type(pit: pd.DataFrame, tags: set[str] | None, floor_n: int, fc_module, 
         "sd": sd,
         "population_mean_z": population_mean_z,
         "reference_features": feature_means.loc[qualified],
+        "adj_mu": adj_mu,
+        "adj_sd": adj_sd,
         "n_qualified": int(len(qualified)),
     }
 

@@ -317,3 +317,67 @@ def test_location_decomposition_reports_both_shares_not_just_points():
     assert top["count"] == "ahead"
     assert top["share"] == pytest.approx(1.0)      # every one of his pitches
     assert top["leagueShare"] == pytest.approx(0.5)  # half the league's
+
+
+def test_adjusted_results_are_emitted_per_pitch_type():
+    """Adj Results is legitimate off the fastball where Location+ is not: it
+    describes what happened with luck, defense and opponent removed, and a
+    description does not need to predict next season to be true. Read it with the
+    pitch count, since the criterion's own reliability is roughly half the
+    four-seam value on secondaries.
+    """
+    mod = _load_pages_module()
+    feats, fitted = _fitted()
+    fitted["pitches"]["adjT"] = [-0.02, -0.01, 0.0, 0.03, 0.02, 0.01]
+    fitted["adj_mu"], fitted["adj_sd"] = 0.0, 0.02
+    records = mod.build_pitcher_records({"Slider": fitted}, feats, floor_n=1,
+                                        asof="2026-03-10", min_type_pitches=1)
+    by_id = {r["pitcherId"]: r["arsenal"][0] for r in records}
+    # Pitcher 1 gives up less (lower adjT is better), so his display score is higher.
+    assert by_id[1]["adjRes"] > by_id[2]["adjRes"]
+    assert by_id[1]["loc"] is None, "a slider still has no Location+"
+
+
+def test_a_pitch_type_with_no_results_scale_emits_no_results_number():
+    """A type with too few qualifying pitchers to define a scale must show
+    nothing rather than a score resting on a scale that was never established.
+    """
+    mod = _load_pages_module()
+    feats, fitted = _fitted()
+    fitted["pitches"]["adjT"] = [-0.02, -0.01, 0.0, 0.03, 0.02, 0.01]
+    fitted["adj_mu"], fitted["adj_sd"] = None, None
+    records = mod.build_pitcher_records({"Splitter": fitted}, feats, floor_n=1,
+                                        asof="2026-03-10", min_type_pitches=1)
+    assert all(r["arsenal"][0]["adjRes"] is None for r in records)
+
+
+def test_pitch_rows_carry_location_on_the_same_scale_as_the_season_number():
+    """One scale, per arsenal.py: a pitch's Location+ and the season Location+
+    go through the same transform, so the two are comparable and a pitch can be
+    read against his own average. A separately calibrated per-pitch scale would
+    look reasonable and quietly break that comparison.
+
+    Fastball only, because Location+ is.
+    """
+    mod = _load_pages_module()
+    feats, fitted = _fitted()
+    records = mod.build_pitcher_records({"FF": fitted}, feats, floor_n=1, asof="2026-03-10",
+                                        min_type_pitches=1)
+    import arsenal as ar
+    # The fixture gives each pitcher a constant raw loc (-0.01 for pitcher 1,
+    # +0.01 for pitcher 2), so every one of his pitch rows must land on the same
+    # display value, and the better locator must score higher.
+    by_id = {r["pitcherId"]: [p for p in r["pitches"] if p["t"] == "FF"] for r in records}
+    for pid, raw in ((1, -0.01), (2, 0.01)):
+        expected = float(ar.to_display(raw, fitted["loc_mu"], fitted["loc_sd"]))
+        assert all(p["l"] == pytest.approx(expected) for p in by_id[pid])
+    assert by_id[1][0]["l"] > by_id[2][0]["l"]
+
+
+def test_secondary_pitch_rows_carry_no_location_grade():
+    mod = _load_pages_module()
+    feats, fitted = _fitted()
+    records = mod.build_pitcher_records({"Slider": fitted}, feats, floor_n=1, asof="2026-03-10",
+                                        min_type_pitches=1)
+    for r in records:
+        assert all(p["l"] is None for p in r["pitches"])

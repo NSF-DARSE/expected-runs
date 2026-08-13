@@ -41,10 +41,19 @@ def test_ids_are_stable_across_calls():
 from webapp_publisher.schema import validate_bundle
 import pytest
 
+def _stub_stuff_attr_detail(row: dict) -> dict:
+    # validate_bundle is exercised here without going through publish.py's
+    # enrich_stuff_attr_detail, so these tests build the same all-null shape
+    # that step produces for a pitcher with no matching arsenal, by hand.
+    names = {f for f, _ in row["stuffAttr"]} | {f for f, _ in row["stuffAttrNoHand"]}
+    return {n: {"value": None, "percentile": None} for n in names}
+
 def test_validate_bundle_rejects_bad_flag():
     staff_scores = json.loads((pathlib.Path(__file__).parent/"fixtures"/"staff_scores.json").read_text())
     bundle = build_bundle(staff_scores, season=2026, data_through="2026-03-15", built_iso="x")
-    bundle["staff_board.json"]["pitchers"][0]["pitcherId"] = 1000101
+    for r in bundle["staff_board.json"]["pitchers"]:
+        r["pitcherId"] = 1000101
+        r["stuffAttrDetail"] = _stub_stuff_attr_detail(r)
     bundle["staff_board.json"]["pitchers"][0]["locFlag"] = "nope"
     with pytest.raises(ValueError):
         validate_bundle(bundle)
@@ -54,6 +63,7 @@ def test_validate_bundle_rejects_missing_manifest_key():
     bundle = build_bundle(staff_scores, season=2026, data_through="2026-03-15", built_iso="x")
     for r in bundle["staff_board.json"]["pitchers"]:
         r["pitcherId"] = 1000101
+        r["stuffAttrDetail"] = _stub_stuff_attr_detail(r)
     del bundle["manifest.json"]["season"]
     with pytest.raises(ValueError):
         validate_bundle(bundle)
@@ -63,8 +73,54 @@ def test_validate_bundle_rejects_empty_pitchers():
     bundle = build_bundle(staff_scores, season=2026, data_through="2026-03-15", built_iso="x")
     for r in bundle["staff_board.json"]["pitchers"]:
         r["pitcherId"] = 1000101
+        r["stuffAttrDetail"] = _stub_stuff_attr_detail(r)
     bundle["staff_board.json"]["pitchers"] = []
     with pytest.raises(ValueError):
+        validate_bundle(bundle)
+
+
+def test_validate_bundle_rejects_stuff_attr_detail_missing_a_named_feature():
+    """Every feature named in stuffAttr/stuffAttrNoHand must have a detail
+    entry, even a null one; a gap here means the enrichment step skipped a
+    trait rather than nulling it out.
+    """
+    staff_scores = json.loads((pathlib.Path(__file__).parent/"fixtures"/"staff_scores.json").read_text())
+    bundle = build_bundle(staff_scores, season=2026, data_through="2026-03-15", built_iso="x")
+    for r in bundle["staff_board.json"]["pitchers"]:
+        r["pitcherId"] = 1000101
+        r["stuffAttrDetail"] = _stub_stuff_attr_detail(r)
+    bundle["staff_board.json"]["pitchers"][0]["stuffAttrDetail"] = {}
+    with pytest.raises(ValueError, match="stuffAttrDetail missing"):
+        validate_bundle(bundle)
+
+
+def test_validate_bundle_rejects_a_value_with_no_matching_percentile():
+    """value and percentile come from the same positional lookup, so one being
+    present without the other means the join half-ran, not that data is
+    genuinely absent.
+    """
+    staff_scores = json.loads((pathlib.Path(__file__).parent/"fixtures"/"staff_scores.json").read_text())
+    bundle = build_bundle(staff_scores, season=2026, data_through="2026-03-15", built_iso="x")
+    for r in bundle["staff_board.json"]["pitchers"]:
+        r["pitcherId"] = 1000101
+        r["stuffAttrDetail"] = _stub_stuff_attr_detail(r)
+    row = bundle["staff_board.json"]["pitchers"][0]
+    any_feature = next(iter(row["stuffAttrDetail"]))
+    row["stuffAttrDetail"][any_feature] = {"value": 91.2, "percentile": None}
+    with pytest.raises(ValueError, match="null together"):
+        validate_bundle(bundle)
+
+
+def test_validate_bundle_rejects_out_of_range_stuff_attr_percentile():
+    staff_scores = json.loads((pathlib.Path(__file__).parent/"fixtures"/"staff_scores.json").read_text())
+    bundle = build_bundle(staff_scores, season=2026, data_through="2026-03-15", built_iso="x")
+    for r in bundle["staff_board.json"]["pitchers"]:
+        r["pitcherId"] = 1000101
+        r["stuffAttrDetail"] = _stub_stuff_attr_detail(r)
+    row = bundle["staff_board.json"]["pitchers"][0]
+    any_feature = next(iter(row["stuffAttrDetail"]))
+    row["stuffAttrDetail"][any_feature] = {"value": 91.2, "percentile": 140}
+    with pytest.raises(ValueError, match="outside 0-100"):
         validate_bundle(bundle)
 
 

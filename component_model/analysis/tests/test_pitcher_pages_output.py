@@ -400,3 +400,25 @@ def test_rare_cells_are_pooled_rather_than_dropped():
     assert any(r["region"] == "Everywhere else" for r in out), "the rare cell must be kept"
     expected = float(ar.to_display(df["loc"].mean(), 0.0, 0.02)) - 100.0
     assert sum(r["points"] for r in out) == pytest.approx(expected, abs=1e-9)
+
+
+def test_league_cell_table_is_taken_before_any_team_filter():
+    """Regression on a shipped defect. 14_pitcher_pages narrows every fitted
+    state to one team before building records, so a decomposition that read that
+    frame compared a pitcher against his own teammates while the card labeled the
+    column D1. On real data that made a staff locating worse than D1 look better
+    than it, because the comparison population WAS that staff.
+    """
+    import arsenal as ar
+    import pandas as pd
+    league = pd.DataFrame([
+        {"PitcherId": pid, "PlateLocSide": side, "PlateLocHeight": 1.8,
+         "BatterSide": "Right", "count12": "0-2", "loc": -0.02}
+        for pid, side in [(1, -0.7)] * 10 + [(2, 0.0)] * 90
+    ])
+    full = ar.league_cell_table(league)
+    one_team = ar.league_cell_table(league[league["PitcherId"] == 1])
+    # The whole point: the two populations give different shares, so which frame
+    # is passed is not an implementation detail.
+    assert full["n"] == 100 and one_team["n"] == 10
+    assert full["share"].max() != one_team["share"].max()

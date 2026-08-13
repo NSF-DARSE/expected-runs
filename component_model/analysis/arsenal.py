@@ -261,6 +261,33 @@ def count_bucket(count12):
     return "behind"
 
 
+def league_cell_table(league, qualified_ids=None):
+    """Share and mean location value per region and count, over the comparison
+    population.
+
+    A separate step because of WHEN it has to run: 14_pitcher_pages narrows every
+    fitted state down to one team before assembling records, so a decomposition
+    that reads that frame compares a pitcher against his own teammates while
+    labeling the column D1. This must be called before that narrowing.
+
+    qualified_ids restricts it to the pitchers the display scale was built from,
+    so the population a pitcher is compared against is the population his score
+    is measured against.
+    """
+    df = league.copy()
+    if qualified_ids is not None:
+        df = df[df["PitcherId"].isin(qualified_ids)]
+    if df.empty:
+        raise ValueError("league frame is empty; the comparison population is missing")
+    rel = _side_relative(df["PlateLocSide"].values, df["BatterSide"].values)
+    hh = _height_band(df["PlateLocHeight"].values)
+    bb = _side_band(rel)
+    df["region"] = [_region_label(a, b) for a, b in zip(hh, bb)]
+    df["bucket"] = [count_bucket(c) for c in df["count12"]]
+    g = df.groupby(["region", "bucket"])
+    return {"share": g.size() / len(df), "value": g["loc"].mean(), "n": int(len(df))}
+
+
 def location_decomposition(sub, league, loc_mu, loc_sd, min_share=0.01):
     """Split a pitcher's Location+ into where he threw, against the league mix.
 
@@ -282,14 +309,13 @@ def location_decomposition(sub, league, loc_mu, loc_sd, min_share=0.01):
         return pd.Series([_region_label(hh, bb) for hh, bb in zip(h, b)], index=df.index)
 
     sub = sub.copy()
-    league = league.copy()
     sub["region"] = cells(sub)
-    league["region"] = cells(league)
     sub["bucket"] = [count_bucket(c) for c in sub["count12"]]
-    league["bucket"] = [count_bucket(c) for c in league["count12"]]
 
-    lg_share = league.groupby(["region", "bucket"]).size() / len(league)
-    lg_value = league.groupby(["region", "bucket"])["loc"].mean()
+    # Accepts a prebuilt table (production, snapshotted before the team filter)
+    # or a raw frame (tests, where the two populations are the same rows).
+    table = league if isinstance(league, dict) else league_cell_table(league)
+    lg_share, lg_value = table["share"], table["value"]
 
     rows = []
     dropped = []

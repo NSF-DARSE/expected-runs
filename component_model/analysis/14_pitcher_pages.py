@@ -93,9 +93,9 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
                             if "RelSpeed" in sub.columns else None),
                 # Where his Location+ came from. Fastball only, because that is
                 # the only type with a Location+ at all.
-                "locWhere": (ar.location_decomposition(sub, state["pitches"],
-                                                       state["loc_mu"], state["loc_sd"])
-                             if tname == "FF" else None),
+                "locWhere": (ar.location_decomposition(
+                    sub, state["league_cells"], state["loc_mu"], state["loc_sd"])
+                    if tname == "FF" and state.get("league_cells") else None),
                 # What actually happened to this pitch type, on the same display
                 # scale. None when the type has too few qualifying pitchers to
                 # define a scale, rather than a number resting on nothing.
@@ -243,6 +243,10 @@ def attach_location(pit: pd.DataFrame, state: dict, tags, fc_module, season_year
         per_pitcher["mean"].values, (per_pitcher["size"] >= floor_n).values
     )
     state["loc_mu"], state["loc_sd"] = loc_mu, loc_sd
+    # The population a pitcher is compared against has to be the one the scale's
+    # zero point came from, or the breakdown carries a constant offset that is
+    # about the population gap rather than about him.
+    state["loc_qualified_ids"] = set(per_pitcher.index[per_pitcher["size"] >= floor_n])
 
 
 def main() -> int:
@@ -263,6 +267,13 @@ def main() -> int:
             print(f"skipping {tname}: {err}")
             continue
         attach_location(pit, state, tags, fc, SEASON_ROLE_YEAR)
+        if tname == "FF":
+            # Snapshot the D1 comparison population HERE. The team filter further
+            # down rewrites state["pitches"] to one staff, and a decomposition
+            # built after that compares a pitcher against his own teammates while
+            # the card calls the column D1.
+            state["league_cells"] = ar.league_cell_table(
+                state["pitches"], state.get("loc_qualified_ids"))
         fitted[tname] = state
         print(f"{tname}: {len(state['pitches'])} pitches, {state['n_qualified']} qualified")
 

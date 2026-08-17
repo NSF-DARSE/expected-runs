@@ -275,12 +275,65 @@ def _side_band(s):
         ["off", "in", "middle", "away"], default="off")
 
 
-def _region_label(hband, sband):
+def _zone_distance_inches(rel_side, height):
+    """Euclidean distance in INCHES from a pitch to the nominal zone rectangle,
+    zero anywhere inside it. `rel_side` is _side_relative's output (positive =
+    away from the hitter); the rectangle is symmetric in side, so only the
+    magnitude matters."""
+    dx = np.maximum(np.abs(np.asarray(rel_side, dtype=float)) - ZONE_HALF_WIDTH, 0.0)
+    dz = np.maximum.reduce([
+        ZONE_BOTTOM - np.asarray(height, dtype=float),
+        np.asarray(height, dtype=float) - ZONE_TOP,
+        np.zeros_like(np.asarray(height, dtype=float)),
+    ])
+    return np.hypot(dx, dz) * 12.0
+
+
+# Out-of-zone bands, by distance outside the rectangle. One label used to cover
+# every miss, and on 1.88M pitches that single row spanned about 16 runs per 100
+# -- wider than the whole in-zone grid -- because a pitch two inches off is
+# BETTER than average for the pitcher (-3.50 runs/100) while one a foot off is
+# much worse (+12.47). The 6-12in (+9.06) and 12+in (+12.47) rows are merged
+# into one band: their run values are closer to each other than to anything
+# nearer the zone, so splitting them buys resolution the coach can't act on.
+OOZ_BANDS = ((2.0, "Just off the zone"), (6.0, "Off the zone"))
+OOZ_FAR_LABEL = "Way off the zone"
+OOZ_REGIONS = ("Just off the zone", "Off the zone", "Way off the zone")
+
+
+def _ooz_label(dist_inches):
+    """Band an out-of-zone distance. Boundaries are upper-inclusive, so exactly
+    2.0in is "Just off the zone" and exactly 6.0in is "Off the zone". The
+    epsilon is not cosmetic: a pitch placed exactly 6in outside comes back as
+    6.000000000000001 after the feet-to-inches round trip, which would put a
+    deliberate boundary case in the wrong band."""
+    for edge, label in OOZ_BANDS:
+        if dist_inches <= edge + 1e-9:
+            return label
+    return OOZ_FAR_LABEL
+
+
+def _region_label(hband, sband, dist_inches=None):
     if hband == "off" or sband == "off":
-        return "Out of the zone"
+        if dist_inches is None:
+            raise ValueError(
+                "an out-of-zone pitch needs its distance to the zone to be banded")
+        return _ooz_label(float(dist_inches))
     if sband == "middle":
         return f"{hband}, middle"
     return f"{hband} and {sband}"
+
+
+def region_series(df):
+    """Region label per row of a pitch frame. The single place the three
+    inputs (height band, side band, distance outside the zone) are combined,
+    so every consumer bands identically."""
+    rel = _side_relative(df["PlateLocSide"].values, df["BatterSide"].values)
+    hh = _height_band(df["PlateLocHeight"].values)
+    bb = _side_band(rel)
+    dd = _zone_distance_inches(rel, df["PlateLocHeight"].values)
+    return pd.Series(
+        [_region_label(a, b, d) for a, b, d in zip(hh, bb, dd)], index=df.index)
 
 
 # Order to display a pitcher's own count-bucket frequency in, everywhere a
@@ -396,10 +449,7 @@ def league_cell_table(league, qualified_ids=None):
         df = df[df["PitcherId"].isin(qualified_ids)]
     if df.empty:
         raise ValueError("league frame is empty; the comparison population is missing")
-    rel = _side_relative(df["PlateLocSide"].values, df["BatterSide"].values)
-    hh = _height_band(df["PlateLocHeight"].values)
-    bb = _side_band(rel)
-    df["region"] = [_region_label(a, b) for a, b in zip(hh, bb)]
+    df["region"] = region_series(df)
     df["bucket"] = [count_bucket(c) for c in df["count12"]]
 
     # One vote per pitcher: 1/(P * n_p) per pitch, so a pitcher's rows sum to
@@ -516,14 +566,8 @@ def location_decomposition(sub, league, loc_mu, loc_sd, min_share=0.01):
     never lands, both just render his own figure with nothing to compare it
     against.
     """
-    def cells(df):
-        s = _side_relative(df["PlateLocSide"].values, df["BatterSide"].values)
-        h = _height_band(df["PlateLocHeight"].values)
-        b = _side_band(s)
-        return pd.Series([_region_label(hh, bb) for hh, bb in zip(h, b)], index=df.index)
-
     sub = sub.copy()
-    sub["region"] = cells(sub)
+    sub["region"] = region_series(sub)
     sub["bucket"] = [count_bucket(c) for c in sub["count12"]]
 
     # Accepts a prebuilt table (production, snapshotted before the team filter)

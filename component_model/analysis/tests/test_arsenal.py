@@ -239,3 +239,70 @@ def test_per_level_scale_prices_the_same_luck_swing_differently():
     pairs = [(0.0055, 0.0011), (0.0002, -0.0042)]  # both: xt - target == -0.0044
     gaps = [ar.to_display(xt, mu_x, sd_x) - ar.to_display(target, mu_t, sd_t) for target, xt in pairs]
     assert gaps[0] != pytest.approx(gaps[1])
+
+
+# ---- out-of-zone banding -----------------------------------------------------
+
+def _region_at(plate_side, height, batter_side="Right"):
+    """Region label for a single pitch, through the production path."""
+    import pandas as pd
+    df = pd.DataFrame({"PlateLocSide": [plate_side], "PlateLocHeight": [height],
+                       "BatterSide": [batter_side]})
+    return ar.region_series(df).iloc[0]
+
+
+def test_in_zone_regions_are_untouched_by_the_out_of_zone_split():
+    """Splitting the miss into bands must not move a single in-zone label."""
+    assert _region_at(0.0, 2.5) == "Middle, middle"
+    # Away is negative PlateLocSide for a RHH, low is under the middle third.
+    assert _region_at(-0.7, 1.8) == "Down and away"
+    assert _region_at(0.7, 3.3) == "Up and in"
+    # A pitch on the zone edge is still in the zone, not "just off" it.
+    assert _region_at(-ar.ZONE_HALF_WIDTH, 2.5) == "Middle and away"
+    assert _region_at(0.0, ar.ZONE_TOP) == "Up, middle"
+
+
+@pytest.mark.parametrize("inches_out,expected", [
+    (0.5, "Just off the zone"),
+    (2.0, "Just off the zone"),    # exactly on the first boundary
+    (2.01, "Off the zone"),
+    (5.9, "Off the zone"),
+    (6.0, "Off the zone"),         # exactly on the second boundary
+    (6.1, "Way off the zone"),
+    (18.0, "Way off the zone"),
+])
+def test_out_of_zone_bands_split_by_distance_horizontally(inches_out, expected):
+    side = -(ar.ZONE_HALF_WIDTH + inches_out / 12.0)   # away from a RHH
+    assert _region_at(side, 2.5) == expected
+
+
+@pytest.mark.parametrize("inches_out,expected", [
+    (1.0, "Just off the zone"),
+    (4.0, "Off the zone"),
+    (10.0, "Way off the zone"),
+])
+def test_out_of_zone_bands_apply_to_height_misses_too(inches_out, expected):
+    """A miss over the hitter's head is banded the same way as one off the
+    side; the band names must not read as side-only."""
+    assert _region_at(0.0, ar.ZONE_TOP + inches_out / 12.0) == expected
+    assert _region_at(0.0, ar.ZONE_BOTTOM - inches_out / 12.0) == expected
+
+
+def test_out_of_zone_distance_is_the_corner_diagonal_when_both_bands_miss():
+    """A pitch missing in BOTH directions is measured to the zone's corner, not
+    to the nearer edge -- 3-4-5, so 3in wide and 4in high is 5in out."""
+    side = -(ar.ZONE_HALF_WIDTH + 3.0 / 12.0)
+    height = ar.ZONE_TOP + 4.0 / 12.0
+    assert ar._zone_distance_inches([side], [height])[0] == pytest.approx(5.0)
+    assert _region_at(side, height) == "Off the zone"
+
+
+def test_zone_distance_is_zero_inside_the_zone():
+    assert ar._zone_distance_inches([0.0], [2.5])[0] == pytest.approx(0.0)
+
+
+def test_out_of_zone_bands_are_handedness_symmetric():
+    """The band depends on distance from the rectangle, which is symmetric in
+    side, so the mirrored pitch to a LHH lands in the same band."""
+    inside_out = ar.ZONE_HALF_WIDTH + 4.0 / 12.0
+    assert _region_at(-inside_out, 2.5, "Right") == _region_at(inside_out, 2.5, "Left")

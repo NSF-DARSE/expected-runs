@@ -5,22 +5,45 @@ import pandas as pd
 import pytest
 
 import webapp_publisher.publish as pub
-from webapp_publisher.publish import default_season, derive_data_through
+from webapp_publisher.publish import default_season, derive_data_through, resolve_years
 
 
-def test_default_season_uses_later_stuffplus_years_value(monkeypatch):
-    monkeypatch.setenv("STUFFPLUS_YEARS", "2024,2025")
-    assert default_season() == 2025
+def test_default_season_uses_later_year_of_the_pair():
+    assert default_season("2024,2025") == 2025
 
 
-def test_default_season_falls_back_when_env_unset(monkeypatch):
-    monkeypatch.delenv("STUFFPLUS_YEARS", raising=False)
-    assert default_season() == 2025
-
-
-def test_default_season_tracks_a_non_default_pair(monkeypatch):
+def test_resolve_years_reads_the_environment_when_no_flag_is_given(monkeypatch):
     monkeypatch.setenv("STUFFPLUS_YEARS", "2025,2026")
-    assert default_season() == 2026
+    assert resolve_years(None) == "2025,2026"
+
+
+def test_resolve_years_prefers_the_flag_over_the_environment(monkeypatch):
+    monkeypatch.setenv("STUFFPLUS_YEARS", "2024,2025")
+    assert resolve_years("2025,2026") == "2025,2026"
+
+
+def test_resolve_years_refuses_to_guess_when_nothing_is_set(monkeypatch):
+    # This used to fall back to a hardcoded "2024,2025", and the pair was never
+    # forwarded to the scorer subprocesses either -- they read the environment
+    # themselves. Publishing with the variable unset therefore produced a bundle
+    # for whatever seasons the default named, which renders completely normally
+    # in the app. The only symptom is a coach eventually noticing a pitcher is
+    # missing. A stopped publish is the cheaper failure, so the fallback is gone
+    # on purpose: do not restore it to make this test pass.
+    monkeypatch.delenv("STUFFPLUS_YEARS", raising=False)
+    with pytest.raises(ValueError, match="No season pair given"):
+        resolve_years(None)
+
+
+def test_resolve_years_rejects_a_descending_pair():
+    # The pair is train,eval and the scorer grades the later year. Reversed, it
+    # would train on the season it is meant to grade.
+    with pytest.raises(ValueError, match="ascending"):
+        resolve_years("2026,2025")
+
+
+def test_default_season_tracks_a_non_default_pair():
+    assert default_season("2025,2026") == 2026
 
 
 def test_derive_data_through_picks_max_date_for_season(tmp_path):
@@ -132,10 +155,11 @@ def test_dry_run_writes_nested_bundle_keys(tmp_path, monkeypatch):
             "arsenal": [{"type": "FF", "n": 412, "usage": 1.0, "stuff": 124.0,
                          "loc": 103.0, "recentChange": -6.2, "avgVelo": 93.1,
                          "aboveFloor": True,
-                         "locWhere": [{"region": "Down and away", "count": "ahead", "n": 412,
+                         "locWhere": [{"region": "Down and away", "n": 412,
                                        "share": 1.0, "leagueShare": 0.3, "points": 3.0,
                                        "occupancyPoints": 1.5, "placementPoints": 1.0,
-                                       "value": -0.01, "leagueValue": -0.005}],
+                                       "value": -0.01, "leagueValue": -0.005,
+                                       "byCount": [{"count": "ahead", "n": 412, "share": 1.0}]}],
                          "locBaseline": 0.5,
                          "typical": [2350.0], "percentiles": [78]}],
             "outings": [{"date": "2026-03-15", "type": "FF", "n": 42, "stuff": 118.0}],
@@ -144,13 +168,25 @@ def test_dry_run_writes_nested_bundle_keys(tmp_path, monkeypatch):
         }],
     }
 
-    monkeypatch.setattr(pub, "run_scorer", lambda data, workdir, team: staff_scores)
-    monkeypatch.setattr(pub, "run_pitcher_scorer", lambda data, workdir, team: pages)
+    # The stubs take `years` because main() now resolves the season pair once and
+    # passes it to both scorers explicitly, rather than letting them each read it
+    # out of the inherited environment. Asserting on it here is what would catch
+    # a future change that stopped forwarding it.
+    seen = {}
+    monkeypatch.setattr(pub, "run_scorer",
+                        lambda data, workdir, team, years: seen.setdefault("staff", years) and None
+                        or staff_scores)
+    monkeypatch.setattr(pub, "run_pitcher_scorer",
+                        lambda data, workdir, team, years: seen.setdefault("pages", years) and None
+                        or pages)
     monkeypatch.setattr(pub.sys, "argv", [
         "publish.py", "--data", "unused.csv", "--workdir", str(tmp_path),
-        "--season", "2026", "--data-through", "2026-03-15", "--dry-run",
+        "--season", "2026", "--data-through", "2026-03-15", "--years", "2025,2026",
+        "--dry-run",
     ])
 
     assert pub.main() == 0
     assert (tmp_path / "bundle" / "pitchers" / "1000123.json").exists()
     assert (tmp_path / "bundle" / "manifest.json").exists()
+    # Both scorers were told which seasons to use, rather than inferring them.
+    assert seen == {"staff": "2025,2026", "pages": "2025,2026"}

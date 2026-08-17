@@ -19,14 +19,25 @@ GOOD = {
                      "avgVelo": 93.1, "aboveFloor": True,
                      # points sum to loc - 100, and occupancy + placement +
                      # locBaseline reach the same 3.0 by the other route.
-                     "locWhere": [{"region": "Down and away", "count": "ahead", "n": 200,
+                     # Rows are one per region; the count split lives only in
+                     # each row's byCount (frequency, no points -- see
+                     # arsenal.location_decomposition).
+                     "locWhere": [{"region": "Down and away", "n": 200,
                                    "share": 0.5, "leagueShare": 0.3, "points": 3.0,
                                    "occupancyPoints": 2.0, "placementPoints": 0.5,
-                                   "value": -0.01, "leagueValue": -0.005},
-                                  {"region": "Up, middle", "count": "even", "n": 212,
+                                   "value": -0.01, "leagueValue": -0.005,
+                                   # leagueShare here is optional (see schema.py) --
+                                   # present on this row to cover the common case,
+                                   # while the other row below omits it to keep
+                                   # covering a bundle from before this field
+                                   # existed, or a bucket the league never lands in.
+                                   "byCount": [{"count": "ahead", "n": 200, "share": 1.0,
+                                                "leagueShare": 0.9}]},
+                                  {"region": "Up, middle", "n": 212,
                                    "share": 0.5, "leagueShare": 0.4, "points": 0.0,
                                    "occupancyPoints": 0.0, "placementPoints": 0.0,
-                                   "value": 0.0, "leagueValue": 0.0}],
+                                   "value": 0.0, "leagueValue": 0.0,
+                                   "byCount": [{"count": "even", "n": 212, "share": 1.0}]}],
                      "locBaseline": 0.5,
                      "typical": [2350.0], "percentiles": [78]}],
         "outings": [{"date": "2026-03-15", "type": "FF", "n": 42, "stuff": 118.0}],
@@ -369,4 +380,22 @@ def test_location_row_missing_a_split_column_is_rejected():
     bad = copy.deepcopy(GOOD)
     del bad["pitchers/1000123.json"]["arsenal"][0]["locWhere"][0]["placementPoints"]
     with pytest.raises(ValueError, match="missing"):
+        validate_pitcher_bundle(bad)
+
+
+def test_byCount_without_leagueShare_still_validates():
+    """leagueShare is optional on a byCount entry: a bundle built between the
+    region-collapse and this change, and a fresh bundle's bucket the league
+    never lands in, both look like this -- REQUIRED_BY_COUNT_KEYS must not
+    grow to include it.
+    """
+    good = copy.deepcopy(GOOD)
+    assert "leagueShare" not in good["pitchers/1000123.json"]["arsenal"][0]["locWhere"][1]["byCount"][0]
+    validate_pitcher_bundle(good)
+
+
+def test_byCount_leagueShare_outside_0_1_is_rejected():
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["arsenal"][0]["locWhere"][0]["byCount"][0]["leagueShare"] = 1.4
+    with pytest.raises(ValueError, match="leagueShare outside 0-1"):
         validate_pitcher_bundle(bad)

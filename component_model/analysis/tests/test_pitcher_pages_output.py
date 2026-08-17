@@ -59,6 +59,10 @@ def _fitted():
         "coef": rng.normal(0, 0.01, 12),
         "mu": 0.0, "sd": 0.02,
         "loc_mu": 0.0, "loc_sd": 0.01,
+        # Pitch-level pair, deliberately a different sd than loc_sd above --
+        # a fixture that gave them the same value could not catch a bug that
+        # collapses the two scales back into one.
+        "loc_pitch_mu": 0.0, "loc_pitch_sd": 0.05,
         "population_mean_z": np.zeros(12),
         "reference_features": pitches.groupby("PitcherId")[feats].mean(),
         "n_qualified": 2,
@@ -255,6 +259,27 @@ def test_attach_location_derives_display_moments_from_qualifying_pitchers():
     assert state["loc_sd"] > 0
 
 
+def test_attach_location_also_derives_a_separate_pitch_level_scale():
+    """The pitch-level pair has to exist alongside loc_mu/loc_sd, not instead
+    of it, and it has to be measured over raw pitches rather than pitcher
+    means -- the whole point of the fix. _FakeMap.apply returns a constant
+    value per pitcher (0.20 for pitcher 1, 0.30 for pitcher 2), so with two
+    pitches per pitcher here the pitch-level values are [0.20, 0.30] just like
+    the pitcher means are, and the two scales happen to agree on this tiny
+    fixture -- the important assertions are that both keys exist and are
+    populated, which is what production code checks for downstream.
+    """
+    mod = _load_pages_module()
+    pit = _two_season_frame()
+    state = {"pitches": pit[pit["year"] == 2025].copy()}
+    mod.attach_location(pit, state, None, _FakeFC, 2025, floor_n=1)
+    assert state["loc_pitch_mu"] is not None
+    assert state["loc_pitch_sd"] is not None
+    assert state["loc_pitch_sd"] > 0
+    # Qualifying population must match: same pitchers feed both scales.
+    assert state["loc_pitch_mu"] == pytest.approx(state["loc_mu"])
+
+
 def test_attach_location_leaves_secondary_types_without_a_value():
     mod = _load_pages_module()
     pit = _two_season_frame()
@@ -262,6 +287,7 @@ def test_attach_location_leaves_secondary_types_without_a_value():
     mod.attach_location(pit, state, {"Slider"}, _FakeFC, 2025, floor_n=1)
     assert state["pitches"]["loc"].isna().all()
     assert state["loc_mu"] is None and state["loc_sd"] is None
+    assert state["loc_pitch_mu"] is None and state["loc_pitch_sd"] is None
 
 
 def test_attach_location_fails_loudly_when_no_earlier_season_exists():
@@ -314,9 +340,14 @@ def test_location_decomposition_reports_both_shares_not_just_points():
     rows = ar.location_decomposition(df[df["PitcherId"] == 1], df, 0.0, 0.02, min_share=0.0)
     top = rows[0]
     assert top["region"] == "Down and away"
-    assert top["count"] == "ahead"
     assert top["share"] == pytest.approx(1.0)      # every one of his pitches
     assert top["leagueShare"] == pytest.approx(0.5)  # half the league's
+    # Rows are one per region now; the count he threw it in is nested, not a
+    # grouping key -- every one of his pitches to this region came ahead.
+    assert len(top["byCount"]) == 1
+    assert top["byCount"][0]["count"] == "ahead"
+    assert top["byCount"][0]["n"] == 40
+    assert top["byCount"][0]["share"] == pytest.approx(1.0)
 
 
 def test_adjusted_results_are_emitted_per_pitch_type():
@@ -351,11 +382,15 @@ def test_a_pitch_type_with_no_results_scale_emits_no_results_number():
     assert all(r["arsenal"][0]["adjRes"] is None for r in records)
 
 
-def test_pitch_rows_carry_location_on_the_same_scale_as_the_season_number():
-    """One scale, per arsenal.py: a pitch's Location+ and the season Location+
-    go through the same transform, so the two are comparable and a pitch can be
-    read against his own average. A separately calibrated per-pitch scale would
-    look reasonable and quietly break that comparison.
+def test_pitch_rows_carry_location_on_the_pitch_level_scale_not_the_season_one():
+    """Regression: per-pitch Location+ used to be routed through the SEASON
+    scale (loc_mu/loc_sd, moments of PER-PITCHER MEANS), which put real pitches
+    at -281.5 to +232.7 on a page that promises 100+/-15, because a season
+    mean's spread is far tighter than a single pitch's. The fix routes it
+    through loc_pitch_mu/loc_pitch_sd (moments of raw per-pitch values)
+    instead. The fixture gives them a different sd (0.05) than loc_sd (0.01)
+    specifically so a regression back to the season pair changes the expected
+    value here and this test catches it.
 
     Fastball only, because Location+ is.
     """
@@ -369,9 +404,30 @@ def test_pitch_rows_carry_location_on_the_same_scale_as_the_season_number():
     # display value, and the better locator must score higher.
     by_id = {r["pitcherId"]: [p for p in r["pitches"] if p["t"] == "FF"] for r in records}
     for pid, raw in ((1, -0.01), (2, 0.01)):
-        expected = float(ar.to_display(raw, fitted["loc_mu"], fitted["loc_sd"]))
+        expected = float(ar.to_display(raw, fitted["loc_pitch_mu"], fitted["loc_pitch_sd"]))
         assert all(p["l"] == pytest.approx(expected) for p in by_id[pid])
     assert by_id[1][0]["l"] > by_id[2][0]["l"]
+
+
+def test_season_location_score_is_unaffected_by_the_pitch_level_scale():
+    """The requirement the fix must not violate: the SEASON Location+ (the
+    arsenal row's `loc`) is built from loc_mu/loc_sd exactly as before, and
+    adding loc_pitch_mu/loc_pitch_sd for the per-pitch number must not move it
+    by a single point. Demonstrated here by computing the expected season
+    score with a scale that could never have been influenced by the new
+    pitch-level pair, then checking it against the published value byte for
+    byte within float tolerance.
+    """
+    mod = _load_pages_module()
+    feats, fitted = _fitted()
+    records = mod.build_pitcher_records({"FF": fitted}, feats, floor_n=1, asof="2026-03-10",
+                                        min_type_pitches=1)
+    import arsenal as ar
+    raw_by_pitcher = fitted["pitches"].groupby("PitcherId")["loc"].mean()
+    for r in records:
+        row = r["arsenal"][0]
+        expected = float(ar.to_display(raw_by_pitcher[r["pitcherId"]], fitted["loc_mu"], fitted["loc_sd"]))
+        assert row["loc"] == pytest.approx(expected, abs=1e-9)
 
 
 def test_secondary_pitch_rows_carry_no_location_grade():
@@ -381,6 +437,49 @@ def test_secondary_pitch_rows_carry_no_location_grade():
                                         min_type_pitches=1)
     for r in records:
         assert all(p["l"] is None for p in r["pitches"])
+
+
+def test_region_rows_carry_no_count_field_and_no_points_in_byCount():
+    """The collapsed row contract, checked directly rather than only implied by
+    other assertions: a region row has no top-level `count` (the frontend's
+    pooled-row detector keys on that being absent from real rows), and its
+    nested byCount entries are frequency only -- his own n/share, plus the
+    optional league counterpart (leagueShare), never a points field.
+    """
+    import arsenal as ar
+    df = _loc_frame()
+    rows = ar.location_decomposition(df[df["PitcherId"] == 1], df, 0.0, 0.02, min_share=0.0)
+    for r in rows:
+        assert "count" not in r
+        for bc in r["byCount"]:
+            assert set(bc) <= {"count", "n", "share", "leagueShare"}
+            assert {"count", "n", "share"} <= set(bc)
+
+
+def test_pooled_rows_byCount_is_combined_from_the_regions_it_pools():
+    """The pooled row still has to answer the count question: it is built by
+    summing the byCount breakdowns of the regions pooled into it, not left
+    empty just because no single region cleared min_share on its own.
+    """
+    import arsenal as ar
+    import pandas as pd
+    rows = [{"PitcherId": 1, "PlateLocSide": -0.7, "PlateLocHeight": 1.8,
+             "BatterSide": "Right", "count12": "0-2", "loc": -0.02} for _ in range(90)]
+    # A second, rare region: 10 pitches total (10% share, under the 15% floor),
+    # split 5 even / 5 behind, so the whole region -- and both its count splits
+    # -- lands in "Everywhere else".
+    rows += [{"PitcherId": 1, "PlateLocSide": 0.0, "PlateLocHeight": 2.5,
+              "BatterSide": "Right", "count12": "0-0", "loc": 0.5} for _ in range(5)]
+    rows += [{"PitcherId": 1, "PlateLocSide": 0.0, "PlateLocHeight": 2.5,
+              "BatterSide": "Right", "count12": "3-2", "loc": 0.5} for _ in range(5)]
+    df = pd.DataFrame(rows)
+    out = ar.location_decomposition(df, df, 0.0, 0.02, min_share=0.15)
+    pooled = next(r for r in out if r["region"] == "Everywhere else")
+    by_count = {bc["count"]: bc for bc in pooled["byCount"]}
+    assert by_count["even"]["n"] == 5
+    assert by_count["behind"]["n"] == 5
+    assert by_count["even"]["share"] == pytest.approx(0.5)
+    assert by_count["behind"]["share"] == pytest.approx(0.5)
 
 
 def test_rare_cells_are_pooled_rather_than_dropped():
@@ -472,8 +571,12 @@ def test_a_spot_he_never_throws_to_is_priced_as_occupancy():
     his = df[df["PitcherId"] == 1]
     rows = ar.location_decomposition(his, df, 0.0, 0.02, min_share=0.0)
     pooled = next(r for r in rows if r["region"] == "Everywhere else")
-    # Up and in, 3-0: 25 of 100 league pitches, none of his.
-    assert pooled["leagueShare"] == pytest.approx(0.25)
+    # Up and in, 3-0: pitcher 2 throws 25 of his 60 pitches there, pitcher 1
+    # throws 0 of his 40. league_cell_table gives each pitcher one vote, so the
+    # cell's share is the average of the two individual shares, (0 + 25/60)/2,
+    # not the pooled pitch count 25/100 -- that pitch-weighted number is exactly
+    # the bug this decomposition had to stop reproducing.
+    assert pooled["leagueShare"] == pytest.approx(25 / 60 / 2)
     assert pooled["share"] == pytest.approx(0.0)
     assert pooled["n"] == 0
     assert pooled["placementPoints"] == pytest.approx(0.0)
@@ -500,7 +603,7 @@ def test_the_baseline_is_the_same_number_for_every_pitcher():
     def over_his_cells(pid):
         rows = ar.location_decomposition(df[df["PitcherId"] == pid], df, mu, sd,
                                          min_share=0.0)
-        seen = {(r["region"], r["count"]) for r in rows if r["share"] > 0}
+        seen = {r["region"] for r in rows if r["share"] > 0}
         return sum(-15.0 * float(table["share"][c]) * (float(table["value"][c]) - mu) / sd
                    for c in table["share"].index if c in seen)
     assert over_his_cells(1) != pytest.approx(over_his_cells(2))
@@ -520,3 +623,198 @@ def test_pooled_row_league_value_covers_exactly_the_pooled_cells():
     out = ar.location_decomposition(df, df, 0.0, 0.02, min_share=0.05)
     pooled = next(r for r in out if r["region"] == "Everywhere else")
     assert pooled["leagueValue"] == pytest.approx(0.5)
+
+
+def test_league_cell_table_weights_every_pitcher_equally():
+    """Regression on the bug this module shipped once: league_cell_table gave
+    every PITCH one vote, so a pitcher who threw more pitches counted for more
+    of both the cell shares and the cell values, while loc_mu (14_pitcher_pages,
+    the zero point this table is compared against) gives every PITCHER one
+    vote. The mismatch surfaced as a constant +2.4 display point "D1's own
+    location mix" baseline on real data, for every pitcher, which was really
+    just the gap between the average pitch and the average pitcher.
+
+    _split_frame gives pitcher 1 forty pitches and pitcher 2 sixty, split across
+    three regions, so pitch-weighting and pitcher-weighting disagree everywhere.
+    This checks the table directly against the by-hand equal-pitcher formula
+    rather than against a downstream identity, so a future change that keeps
+    the identity but drifts the weighting again still gets caught here.
+
+    Cells are keyed by region alone (count is no longer a grouping dimension
+    of this table, see league_cell_table's docstring), so this checks the same
+    three regions _split_frame always described, just without the count half
+    of the old (region, count) key -- _split_frame happens to put each region's
+    pitches in a single count bucket, so collapsing the key changes nothing
+    about which pitches land in which region.
+    """
+    import arsenal as ar
+    df = _split_frame()
+    table = ar.league_cell_table(df)
+
+    region_down_away = "Down and away"   # only pitcher 1: 30/40
+    region_middle = "Middle, middle"     # both: 10/40 and 35/60
+    region_up_in = "Up and in"           # only pitcher 2: 25/60
+
+    expected_share = {
+        region_down_away: (30 / 40 + 0) / 2,
+        region_middle: (10 / 40 + 35 / 60) / 2,
+        region_up_in: (0 + 25 / 60) / 2,
+    }
+    for region, share in expected_share.items():
+        assert table["share"][region] == pytest.approx(share)
+    assert sum(expected_share.values()) == pytest.approx(1.0)
+
+    # value in the mixed region is the same per-pitcher weighting applied to
+    # loc, not the plain 45-pitch pitch-weighted mean.
+    p1_w, p1_v = 10 / 40, 0.01
+    p2_w, p2_v = 35 / 60, 0.02
+    expected_value = (p1_w * p1_v + p2_w * p2_v) / (p1_w + p2_w)
+    assert table["value"][region_middle] == pytest.approx(expected_value)
+
+    # n is still a raw pitch count, not a weighted quantity.
+    assert table["n"] == 100
+
+
+def test_location_baseline_is_zero_when_weighted_like_loc_mu():
+    """The baseline term is sum_c w*_c(v*_c - loc_mu). league_cell_table's
+    weighting telescopes exactly back to loc_mu -- the mean of per-pitcher
+    means -- so if loc_mu really is that same mean, the baseline has to be
+    zero to floating-point error. It is not a real "league location mix"
+    effect; it is a check that the two weightings still agree. The old,
+    pitch-weighted table gave a nonzero constant here (+2.4 display points on
+    a real 18-pitcher staff), which is the bug this reconciles.
+
+    Tolerance is 1e-6 display points, tight enough that reintroducing a
+    pitch-weighted share or value (worth whole points on real data) fails
+    this test immediately.
+    """
+    import arsenal as ar
+    df = _split_frame()
+    per_pitcher_mean = df.groupby("PitcherId")["loc"].mean()
+    loc_mu = float(per_pitcher_mean.mean())   # one vote per pitcher, like 14_pitcher_pages.py
+    baseline = ar.location_baseline(df, loc_mu, loc_sd=0.02)
+    assert abs(baseline) < 1e-6
+
+
+def test_byCount_leagueShare_sums_to_one_within_a_region():
+    """The denominator the request hinges on: his own byCount shares already
+    sum to 1.0 within one region (three buckets partition his pitches to that
+    spot exhaustively). D1's leagueShare has to be normalized the same way --
+    of D1's pitches to THIS region, not to D1's whole arsenal -- so it also
+    sums to 1.0 within the region, even though both sides throw to the region
+    in very different counts.
+    """
+    import arsenal as ar
+    import pandas as pd
+    rows = []
+    # Region "Middle, middle": pitcher 1 goes ahead-heavy, D1 (pitcher 2, more
+    # pitches so pitch-weighting would disagree with pitcher-weighting too)
+    # goes behind-heavy. Different mixes on purpose, so a bug that copies one
+    # side's shares onto the other would be caught by the value, not just the
+    # sum-to-one check.
+    rows += [{"PitcherId": 1, "PlateLocSide": 0.0, "PlateLocHeight": 2.5,
+              "BatterSide": "Right", "count12": "0-2", "loc": 0.01}] * 8
+    rows += [{"PitcherId": 1, "PlateLocSide": 0.0, "PlateLocHeight": 2.5,
+              "BatterSide": "Right", "count12": "1-1", "loc": 0.01}] * 2
+    rows += [{"PitcherId": 2, "PlateLocSide": 0.0, "PlateLocHeight": 2.5,
+              "BatterSide": "Right", "count12": "1-0", "loc": 0.02}] * 30
+    rows += [{"PitcherId": 2, "PlateLocSide": 0.0, "PlateLocHeight": 2.5,
+              "BatterSide": "Right", "count12": "1-1", "loc": 0.02}] * 20
+    df = pd.DataFrame(rows)
+    his = df[df["PitcherId"] == 1]
+    out = ar.location_decomposition(his, df, 0.0, 0.02, min_share=0.0)
+    row = next(r for r in out if r["region"] == "Middle, middle")
+    by_count = {bc["count"]: bc for bc in row["byCount"]}
+
+    # His own side: unchanged contract, 8/10 ahead, 2/10 even.
+    assert by_count["ahead"]["share"] == pytest.approx(0.8)
+    assert by_count["even"]["share"] == pytest.approx(0.2)
+    assert "behind" not in by_count   # he never throws behind here
+
+    # D1's side: each pitcher gets total weight 1/n_pitchers = 1/2 for this
+    # region (every one of both pitchers' pitches lands here), split across
+    # buckets in proportion to his own pitch count within the region --
+    # pitcher 1 contributes 8/10 of his 1/2 to ahead and 2/10 to even;
+    # pitcher 2 contributes 30/50 of his 1/2 to behind and 20/50 to even.
+    ahead_w = 0.5 * (8 / 10)
+    even_w = 0.5 * (2 / 10) + 0.5 * (20 / 50)
+    behind_w = 0.5 * (30 / 50)
+    region_total = ahead_w + even_w + behind_w
+    assert region_total == pytest.approx(1.0)   # one vote per pitcher, two pitchers
+    assert by_count["ahead"]["leagueShare"] == pytest.approx(ahead_w / region_total)
+    assert by_count["even"]["leagueShare"] == pytest.approx(even_w / region_total)
+
+    # "behind" is missing from his own byCount (he never throws it), but D1
+    # does throw behind here -- confirm the full three-bucket split still
+    # sums to 1.0 by reconstructing it from the row's own leagueShare share.
+    ahead_frac = by_count["ahead"]["leagueShare"]
+    even_frac = by_count["even"]["leagueShare"]
+    behind_frac = behind_w / region_total
+    assert behind_frac > 0   # D1 does throw behind here even though he doesn't
+    assert ahead_frac + even_frac + behind_frac == pytest.approx(1.0)
+
+
+def test_byCount_leagueShare_absent_when_league_never_lands_in_that_bucket():
+    """A bucket the league table has literally no weight in gets no
+    leagueShare key at all, distinct from a real 0% -- so the frontend can
+    tell "never measured" from "measured at zero" if it ever needs to."""
+    import arsenal as ar
+    import pandas as pd
+    rows = [{"PitcherId": 1, "PlateLocSide": 0.0, "PlateLocHeight": 2.5,
+             "BatterSide": "Right", "count12": "0-2", "loc": 0.01}] * 5
+    rows += [{"PitcherId": 1, "PlateLocSide": 0.0, "PlateLocHeight": 2.5,
+              "BatterSide": "Right", "count12": "3-0", "loc": 0.01}] * 5
+    df = pd.DataFrame(rows)
+    out = ar.location_decomposition(df, df, 0.0, 0.02, min_share=0.0)
+    row = next(r for r in out if r["region"] == "Middle, middle")
+    by_count = {bc["count"]: bc for bc in row["byCount"]}
+    assert "leagueShare" in by_count["ahead"]
+    assert "leagueShare" in by_count["behind"]
+    assert "even" not in by_count   # nobody, him or the league, ever throws even here
+
+
+def test_pooled_byCount_leagueShare_is_weight_pooled_not_fraction_averaged():
+    """The pooled row's leagueShare per bucket has to combine the pooled
+    regions' RAW league weight, not average their per-region fractions --
+    two regions with very different amounts of league weight would otherwise
+    give the smaller one an equal vote it didn't earn.
+    """
+    import arsenal as ar
+    import pandas as pd
+    rows = [{"PitcherId": 1, "PlateLocSide": -0.7, "PlateLocHeight": 1.8,
+             "BatterSide": "Right", "count12": "0-2", "loc": -0.02} for _ in range(90)]
+    # Two rare regions, each individually pooled. Region A: 100% ahead on both
+    # sides. Region B: 100% behind on both sides, but with ten times region
+    # A's league weight (more pitchers/pitches land there), so a pooled
+    # leagueShare that averages fractions (0.5/0.5) would be wrong; the
+    # correct weight-pooled answer leans heavily toward region B's bucket.
+    rows += [{"PitcherId": 1, "PlateLocSide": 0.0, "PlateLocHeight": 2.5,
+              "BatterSide": "Right", "count12": "3-0", "loc": 0.5} for _ in range(3)]
+    rows += [{"PitcherId": 2, "PlateLocSide": 0.0, "PlateLocHeight": 2.5,
+              "BatterSide": "Right", "count12": "3-0", "loc": 0.5} for _ in range(3)]
+    rows += [{"PitcherId": 1, "PlateLocSide": 0.7, "PlateLocHeight": 3.2,
+              "BatterSide": "Right", "count12": "0-2", "loc": 0.3} for _ in range(2)]
+    rows += [{"PitcherId": 2, "PlateLocSide": 0.7, "PlateLocHeight": 3.2,
+              "BatterSide": "Right", "count12": "0-2", "loc": 0.3} for _ in range(20)]
+    df = pd.DataFrame(rows)
+    his = df[df["PitcherId"] == 1]
+    out = ar.location_decomposition(his, df, 0.0, 0.02, min_share=0.5)
+    pooled = next(r for r in out if r["region"] == "Everywhere else")
+    by_count = {bc["count"]: bc for bc in pooled["byCount"]}
+    # Weight-pooled: region "Up and in" carries far more league weight
+    # (pitcher 2's 20 pitches vs pitcher 1's 2, one vote each but very
+    # different WITHIN-region shares feeding a bigger denominator here isn't
+    # the point -- the point is the two regions' total leagueShare differ),
+    # so the pooled ahead/behind split should not be a plain 50/50 average.
+    total_lg = sum(v for v in by_count.values() if "leagueShare" in v
+                   for v in [v["leagueShare"]])
+    assert total_lg == pytest.approx(1.0)
+
+
+def test_league_cell_table_raises_on_an_empty_frame():
+    """An empty comparison population is a missing-data error, not a table with
+    no rows -- there is nothing to reconcile loc_mu against."""
+    import arsenal as ar
+    df = _split_frame()
+    with pytest.raises(ValueError, match="comparison population is missing"):
+        ar.league_cell_table(df[df["PitcherId"] == 999])

@@ -4,6 +4,12 @@ REQUIRED_ROW_KEYS = {"id","name","hand","ff","stuff","loc","adjres","pitch",
                      "stuffNoHand","pitchNoHand","stuffAttrNoHand","pitcherId",
                      "stuffAttrDetail"}
 
+# resLadder is optional -- see build_bundle._res_ladder -- but a row that
+# carries it at all has to carry the whole thing, the same contract locWhere
+# has with locBaseline below.
+RES_LADDER_KEYS = {"runsAllowed", "expRunsAllowed", "runsAllowedRaw",
+                   "expRunsAllowedRaw", "adjResultsRaw"}
+
 
 def _check_stuff_attr_detail(row: dict) -> None:
     """stuffAttrDetail carries one value/percentile pair per feature named in
@@ -58,6 +64,16 @@ def validate_bundle(bundle: dict) -> None:
                 f"board row {r.get('name')} has a Location+ decomposition but no "
                 f"numeric locBaseline"
             )
+        if r.get("resLadder") is not None:
+            missing_ladder = RES_LADDER_KEYS - set(r["resLadder"])
+            if missing_ladder:
+                raise ValueError(
+                    f"board row {r.get('name')} resLadder missing {missing_ladder}"
+                )
+            _check_display_band(r["resLadder"]["runsAllowed"], ADJRES_BAND,
+                                key="staff_board.json", field="Runs Allowed", ptype="FF")
+            _check_display_band(r["resLadder"]["expRunsAllowed"], ADJRES_BAND,
+                                key="staff_board.json", field="Expected Runs Allowed", ptype="FF")
         _check_stuff_attr_detail(r)
 
 
@@ -75,9 +91,23 @@ LOC_DECOMP_TOLERANCE = 0.01
 # pooling step that could legitimately lose anything, so it is held to float
 # error rather than to the looser tolerance above.
 LOC_SPLIT_TOLERANCE = 1e-9
-REQUIRED_LOC_WHERE_KEYS = {"region", "count", "n", "share", "leagueShare",
+REQUIRED_LOC_WHERE_KEYS = {"region", "n", "share", "leagueShare",
                            "points", "occupancyPoints", "placementPoints",
-                           "value", "leagueValue"}
+                           "value", "leagueValue", "byCount"}
+
+# byCount is a frequency-only nested breakdown (see arsenal.location_decomposition
+# for why it carries no points), so its contract is lighter than the row it
+# sits under: just enough that the page can render "N pitches, X% of this spot"
+# per count bucket without a KeyError.
+REQUIRED_BY_COUNT_KEYS = {"count", "n", "share"}
+
+# leagueShare (D1's own count-bucket split of the same region, arsenal.py's
+# _league_by_count_share) is OPTIONAL on a byCount entry, not required: a
+# bundle built between the region-collapse and this change has byCount with
+# no leagueShare at all, and even a fresh bundle omits it on a bucket the
+# league table has no weight in at all (see league_cell_table's count_weight
+# docstring -- that is a real absence, not a bug). When present it has to be
+# a share like any other.
 REQUIRED_PITCH_KEYS = {"d", "t", "x", "z", "c", "g", "f"}
 
 # Plausible-range guard for scores on the 100+/-15 display scale. A raw
@@ -244,6 +274,31 @@ def validate_pitcher_bundle(files: dict) -> None:
                             f"{key} Location+ row {r['region']!r} missing {missing}")
                     if not 0.0 <= r["share"] <= 1.0 or not 0.0 <= r["leagueShare"] <= 1.0:
                         raise ValueError(f"{key} Location+ row {r['region']!r} has a share outside 0-1")
+                    # Rows are collapsed to one per region (see arsenal.py); a
+                    # `count` key here would mean a bundle built before that
+                    # collapse, or a regression back to (region, count) rows.
+                    # The frontend's pooled-row detector keys on `count == "all"`
+                    # and would misread a region row carrying it as the pooled
+                    # catch-all, so this cannot be a soft warning.
+                    if "count" in r:
+                        raise ValueError(
+                            f"{key} Location+ row {r['region']!r} carries a `count` field; "
+                            f"rows are one per region now, with per-count frequency nested "
+                            f"under `byCount` instead"
+                        )
+                    for bc in r["byCount"]:
+                        bc_missing = REQUIRED_BY_COUNT_KEYS - set(bc)
+                        if bc_missing:
+                            raise ValueError(
+                                f"{key} Location+ row {r['region']!r} byCount entry missing {bc_missing}")
+                        if not 0.0 <= bc["share"] <= 1.0:
+                            raise ValueError(
+                                f"{key} Location+ row {r['region']!r} byCount[{bc['count']!r}] "
+                                f"has a share outside 0-1")
+                        if "leagueShare" in bc and not 0.0 <= bc["leagueShare"] <= 1.0:
+                            raise ValueError(
+                                f"{key} Location+ row {r['region']!r} byCount[{bc['count']!r}] "
+                                f"has a leagueShare outside 0-1")
                 if not isinstance(a["locBaseline"], (int, float)):
                     raise ValueError(
                         f"{key} fastball row has no numeric Location+ baseline; without it "

@@ -66,7 +66,49 @@ USECOLS = ["PitchUID", "Date", "Pitcher", "PitcherId", "PitcherThrows", "Pitcher
 OPTIONAL_COLS = ["RelSpeed"]
 
 RIDGE_ALPHA = 10
-BATTER_K = 200
+
+# Shrinkage weight for the batter effect in add_adjusted: a batter with K pitches
+# is credited with half his own measured effect and half his league's average.
+#
+# Was 200, chosen by convention rather than tuned. Swept 2026-08-14 over
+# K = 0, 25, 50, 100, 200, 400, 800, 1600, 3200 and infinity, on both available
+# year pairs (2024->2025, 649 panel pitchers; 2025->2026, 825), scoring
+# year-over-year reliability and predictive validity with a paired bootstrap on
+# the differences against K=200. Lower K was better on reliability throughout,
+# monotonically, and infinity (no batter adjustment at all) was the worst option
+# everywhere, so the adjustment itself earns its place.
+#
+# Three things had to be ruled out before believing that, because the first read
+# of the sweep was reliability improving while validity stayed flat, which is the
+# signature of a score absorbing a stable context feature rather than measuring
+# pitching better:
+#   - Self-contamination. A batter's effect includes the pitches thrown to him by
+#     the pitcher being evaluated, so a pitcher can subtract his own achievement
+#     back out. Recomputing leave-one-pitcher-out moved every K by ~0.001-0.002,
+#     far inside bootstrap noise. Real, but not what drives the result.
+#   - Thin-sample exposure leaking in. At low K a 9-pitch batter has his full raw
+#     mean subtracted, neutralizing those pitches; if "faces thin-sample batters"
+#     were a persistent pitcher trait it would inflate reliability for free. It
+#     is not persistent (year-over-year r of that share is 0.08-0.27, against
+#     ~0.8 for a real trait), the reliability gain is SMALLEST in the
+#     highest-exposure tercile rather than largest, and the gain survives a sweep
+#     that leaves every batter under n=100 completely unadjusted.
+#   - The flat validity was itself an artifact of the target. Validity had been
+#     measured against year-2 mean xT, which is not opponent adjusted and so
+#     still carries the opponent variance this parameter exists to remove; a
+#     predictor cannot predict noise the target retains. Re-run against year-2
+#     adjT held fixed at K=200 (hash-checked as invariant across the sweep, so
+#     not circular), validity does rise as K falls, outside 1 SE at K=50 and
+#     K=100 on both pairs.
+#
+# 100 rather than 0 because validity stops improving below ~50 while reliability
+# keeps climbing, and an unshrunk estimator trusting a 9-pitch batter as fully as
+# a 900-pitch one is not something this data can justify. The practical effect is
+# small: median |change| to a pitcher's displayed Adj Results is about 0.2 points
+# on the 100+/-15 scale, p90 about 0.5, max 1.6. Adopted for correctness while
+# the extract was being rebuilt anyway, not because any grade visibly moves.
+BATTER_K = 100
+
 PANEL_MIN_FF = 100
 
 

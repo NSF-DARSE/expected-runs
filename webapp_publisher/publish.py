@@ -38,19 +38,47 @@ def _load_env_file() -> None:
     load_dotenv(env_path)
 
 
-def default_season() -> int:
-    """The season the scorer actually grades: the later year in STUFFPLUS_YEARS.
+def resolve_years(cli_years: str | None) -> str:
+    """The train,eval year pair, from --years or STUFFPLUS_YEARS, never guessed.
+
+    This used to be read only inside default_season(), with a hardcoded
+    "2024,2025" fallback, and it was never forwarded to the two scorer
+    subprocesses at all. They picked the pair up from the inherited environment
+    instead. That worked silently right up until it didn't: publishing with
+    STUFFPLUS_YEARS unset produced a bundle labelled for one season while the
+    scorer graded another, or, once the source CSV no longer carried 2024,
+    crashed inside the scorer on an empty training slice with nothing pointing
+    back at the real cause.
+
+    So the pair is resolved once, here, and passed explicitly to both
+    subprocesses. There is deliberately no fallback: a stale default is worse
+    than a stopped publish, because the wrong-season bundle looks entirely
+    normal in the app and nobody finds out until a coach asks why a name is
+    missing.
+    """
+    raw = cli_years or os.environ.get("STUFFPLUS_YEARS")
+    if not raw:
+        raise ValueError(
+            "No season pair given. Pass --years 2025,2026 or set STUFFPLUS_YEARS. "
+            "This is not defaulted on purpose: a bundle built for the wrong seasons "
+            "renders normally and is only caught by someone noticing absent pitchers.")
+    years = [int(y.strip()) for y in raw.split(",")]
+    if len(years) != 2:
+        raise ValueError(f"--years must be two comma-separated years, got {raw!r}")
+    if years[0] >= years[1]:
+        raise ValueError(f"--years must be ascending (train,eval), got {raw!r}")
+    return f"{years[0]},{years[1]}"
+
+
+def default_season(years: str) -> int:
+    """The season the scorer actually grades: the later year of the pair.
 
     08_staff_scores.py's population is always the LATER year of the
     train,eval pair (relabeled internally to the "2025" role regardless of
     the literal year) -- see fair_criterion.py's --years/STUFFPLUS_YEARS
     docstring. Labels must follow that, not a free-text default.
     """
-    years_env = os.environ.get("STUFFPLUS_YEARS", "2024,2025")
-    years = [int(y.strip()) for y in years_env.split(",")]
-    if len(years) != 2:
-        raise ValueError(f"STUFFPLUS_YEARS must be two comma-separated years, got {years_env!r}")
-    return max(years)
+    return max(int(y) for y in years.split(","))
 
 
 def derive_data_through(data_path: str, season: int, team: str) -> str:
@@ -83,10 +111,11 @@ def derive_data_through(data_path: str, season: int, team: str) -> str:
     return in_season.max().strftime("%Y-%m-%d")
 
 
-def run_scorer(data: str, workdir: str, team: str) -> dict:
+def run_scorer(data: str, workdir: str, team: str, years: str) -> dict:
     workdir_p = pathlib.Path(workdir)
     workdir_p.mkdir(parents=True, exist_ok=True)
-    cmd = [sys.executable, str(SCORER), "--data", data, "--workdir", workdir, "--team", team]
+    cmd = [sys.executable, str(SCORER), "--data", data, "--workdir", workdir,
+           "--team", team, "--years", years]
     subprocess.run(cmd, check=True)  # raises CalledProcessError -> loud failure
     out = workdir_p / "staff_scores.json"
     if not out.exists():
@@ -94,9 +123,10 @@ def run_scorer(data: str, workdir: str, team: str) -> dict:
     return json.loads(out.read_text())
 
 
-def run_pitcher_scorer(data: str, workdir: str, team: str) -> dict:
+def run_pitcher_scorer(data: str, workdir: str, team: str, years: str) -> dict:
     workdir_p = pathlib.Path(workdir)
-    cmd = [sys.executable, str(PITCHER_SCORER), "--data", data, "--workdir", workdir, "--team", team]
+    cmd = [sys.executable, str(PITCHER_SCORER), "--data", data, "--workdir", workdir,
+           "--team", team, "--years", years]
     subprocess.run(cmd, check=True)  # raises CalledProcessError -> loud failure
     out = workdir_p / "pitcher_pages.json"
     if not out.exists():
@@ -117,18 +147,23 @@ def main() -> int:
     ap.add_argument("--data-through", default=None,
                     help="Override YYYY-MM-DD latest game date. Default: derived from the "
                          "max Date in --data restricted to the season year.")
+    ap.add_argument("--years", default=None,
+                    help="Train,eval season pair, e.g. 2025,2026. Falls back to "
+                         "STUFFPLUS_YEARS. Required: not defaulted, because a bundle "
+                         "built for the wrong seasons renders normally.")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
     if not args.data or not args.workdir:
         ap.error("--data and --workdir (or STUFFPLUS_DATA/STUFFPLUS_WORKDIR) required")
 
-    season = args.season if args.season is not None else default_season()
+    years = resolve_years(args.years)
+    season = args.season if args.season is not None else default_season(years)
     data_through = args.data_through if args.data_through is not None else derive_data_through(args.data, season, args.team)
 
-    staff_scores = run_scorer(args.data, args.workdir, args.team)
+    staff_scores = run_scorer(args.data, args.workdir, args.team, years)
     built = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     bundle = build_bundle(staff_scores, season=season, data_through=data_through, built_iso=built)
-    pages = run_pitcher_scorer(args.data, args.workdir, args.team)
+    pages = run_pitcher_scorer(args.data, args.workdir, args.team, years)
     pitcher_files = build_pitcher_bundle(pages)
     validate_pitcher_bundle(pitcher_files)
     bundle["manifest.json"]["pitchers"] = pitcher_index(pages)

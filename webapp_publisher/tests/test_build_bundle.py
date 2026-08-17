@@ -19,9 +19,13 @@ def test_build_bundle_shapes_manifest_and_board():
     assert board["team"] == "DEL_BLU"
     assert board["population"] == 543
     row = board["pitchers"][0]
+    # Test-Pitcher, Alpha is the fixture row carrying the new ladder fields;
+    # Test-Pitcher, Bravo (see test_res_ladder_is_absent_when_upstream_lacks_it
+    # below) does not, and must come out with no "resLadder" key at all.
     assert set(row) == {"id","name","hand","ff","stuff","loc","adjres","pitch",
                         "whiff","zone","heart","meanHeight","locFlag","stuffAttr",
-                        "stuffNoHand","pitchNoHand","stuffAttrNoHand","pitcherId"}
+                        "stuffNoHand","pitchNoHand","stuffAttrNoHand","pitcherId",
+                        "resLadder"}
     assert isinstance(row["id"], int)
     assert row["locFlag"] in ("", "caution", "small sample")
     assert isinstance(row["stuffAttr"], list) and isinstance(row["stuffAttr"][0], list)
@@ -29,6 +33,23 @@ def test_build_bundle_shapes_manifest_and_board():
     assert isinstance(row["pitchNoHand"], (int, float))
     assert isinstance(row["stuffAttrNoHand"], list) and isinstance(row["stuffAttrNoHand"][0], list)
     assert len(row["stuffAttrNoHand"][0]) == 2
+    assert set(row["resLadder"]) == {"runsAllowed", "expRunsAllowed", "runsAllowedRaw",
+                                     "expRunsAllowedRaw", "adjResultsRaw"}
+    assert row["resLadder"]["runsAllowed"] == pytest.approx(96.4)
+    assert row["resLadder"]["expRunsAllowed"] == pytest.approx(105.7)
+
+
+def test_res_ladder_is_absent_when_upstream_lacks_it():
+    """Test-Pitcher, Bravo carries no res_* fields in the fixture, standing in
+    for a staff_scores.json built before the ladder existed. The row must come
+    out with no "resLadder" key at all -- not a key holding null -- so the
+    frontend's own optional-field check (key absent, per types.ts) matches
+    what the bundle actually ships.
+    """
+    staff_scores = json.loads(FIX.read_text())
+    bundle = build_bundle(staff_scores, season=2026, data_through="2026-03-15", built_iso="x")
+    bravo = next(r for r in bundle["staff_board.json"]["pitchers"] if r["name"] == "Test-Pitcher, Bravo")
+    assert "resLadder" not in bravo
 
 def test_ids_are_stable_across_calls():
     staff_scores = json.loads(FIX.read_text())
@@ -153,8 +174,37 @@ def test_validate_bundle_rejects_a_board_decomposition_with_no_baseline():
         r["pitcherId"] = 1000101
         r["stuffAttrDetail"] = _stub_stuff_attr_detail(r)
     bundle["staff_board.json"]["pitchers"][0]["locWhere"] = [
-        {"region": "Down and away", "count": "ahead", "n": 41, "share": 0.31,
+        {"region": "Down and away", "n": 41, "share": 0.31,
          "leagueShare": 0.18, "points": 14.0, "occupancyPoints": 9.0,
-         "placementPoints": 4.5, "value": -0.004, "leagueValue": -0.002}]
+         "placementPoints": 4.5, "value": -0.004, "leagueValue": -0.002,
+         "byCount": [{"count": "ahead", "n": 41, "share": 1.0}]}]
     with pytest.raises(ValueError, match="no numeric locBaseline"):
+        validate_bundle(bundle)
+
+
+def test_validate_bundle_rejects_res_ladder_missing_a_key():
+    staff_scores = json.loads((pathlib.Path(__file__).parent/"fixtures"/"staff_scores.json").read_text())
+    bundle = build_bundle(staff_scores, season=2026, data_through="2026-03-15", built_iso="x")
+    for r in bundle["staff_board.json"]["pitchers"]:
+        r["pitcherId"] = 1000101
+        r["stuffAttrDetail"] = _stub_stuff_attr_detail(r)
+    row = next(r for r in bundle["staff_board.json"]["pitchers"] if "resLadder" in r)
+    del row["resLadder"]["expRunsAllowed"]
+    with pytest.raises(ValueError, match="resLadder missing"):
+        validate_bundle(bundle)
+
+
+def test_validate_bundle_rejects_res_ladder_out_of_band():
+    """An unscaled raw run value slipping into a display-scale field is the
+    same failure mode DISPLAY_BAND/ADJRES_BAND already guard against for
+    stuff/loc/adjres; runsAllowed and expRunsAllowed get the identical check.
+    """
+    staff_scores = json.loads((pathlib.Path(__file__).parent/"fixtures"/"staff_scores.json").read_text())
+    bundle = build_bundle(staff_scores, season=2026, data_through="2026-03-15", built_iso="x")
+    for r in bundle["staff_board.json"]["pitchers"]:
+        r["pitcherId"] = 1000101
+        r["stuffAttrDetail"] = _stub_stuff_attr_detail(r)
+    row = next(r for r in bundle["staff_board.json"]["pitchers"] if "resLadder" in r)
+    row["resLadder"]["runsAllowed"] = -0.004  # raw run value, never scaled
+    with pytest.raises(ValueError, match="Runs Allowed"):
         validate_bundle(bundle)

@@ -10,6 +10,20 @@ plus whiff rate, location fingerprint rates, a Location+ sample flag
 (<50 FF flagged, 50-99 caution, per script 06), and a Stuff+ feature
 attribution vs the qualified-population mean.
 
+Also emits the Adj Results LADDER: the same C2 quantity, but shown at the two
+earlier stages of the fair-criterion pipeline it is built from (RESULTS.md,
+"The fair criterion") --
+
+  Runs Allowed           raw results, luck and bad defense still in (C0)
+  Expected Runs Allowed  luck/defense stripped via the EV/LA map (C1, xT)
+  Adj Results            opponent quality subtracted too (C2, adjT) -- AdjRes100
+
+A coach asked to see "how much luck and defense were worth" separately from
+the score; C0 minus C1 is exactly that quantity, already computed and already
+thrown away downstream (adjT never carries it). This does not add a third
+component to the score -- it decomposes on the way it was BUILT, not on what
+it is made of, and Adj Results still equals its own bottom rung exactly.
+
 Also writes <workdir>/staff_scores.json with the staff records and the
 count-conditioned location grids (pooled + all 12 counts) for pitch-level
 explanation displays -- an 0-2 chase pitch must render as a good pitch.
@@ -20,6 +34,7 @@ import json
 import numpy as np
 import pandas as pd
 
+import arsenal as ar
 import fair_criterion as fc
 
 MIN_STAFF_FF = 30
@@ -45,7 +60,8 @@ cmap = fc.CountLocationMap(train, "count12", M_SHRINK)
 f25 = ff[ff["year"] == 2025]
 g = f25.groupby("PitcherId")
 pt = g.agg(n_ff=("Target", "size"), ridge=("ridge_pred", "mean"), loc=("loc", "mean"),
-           adj=("adjT", "mean"), name=("Pitcher", "first"), team=("PitcherTeam", "first"),
+           adj=("adjT", "mean"), target=("Target", "mean"), xt=("xT", "mean"),
+           name=("Pitcher", "first"), team=("PitcherTeam", "first"),
            hand=("PitcherThrows", "first"),
            **{f: (f, "mean") for f in fc.FEATS}).reset_index()
 qual = pt[pt["n_ff"] >= 100]
@@ -60,6 +76,26 @@ pt["AdjRes100"] = 100 + 15 * pt["z_adj"]
 blend = (pt["z_ridge"] + pt["z_loc"] + pt["z_adj"]) / 3
 qb = blend[pt["n_ff"] >= 100]
 pt["Pitch100"] = 100 + 15 * (blend - qb.mean()) / qb.std()
+
+# ---- Adj Results ladder: Target -> xT -> adjT, ONE shared scale ----
+# Runs Allowed and Expected Runs Allowed are deliberately NOT given their own
+# population mean/sd. They ride mu["adj"]/sd["adj"] -- the exact pair AdjRes100
+# itself is built on. Summing a level plus the two gaps back to the far
+# endpoint is telescoping algebra (a + (b-a) + (c-b) == c) and would hold no
+# matter what (mu, sd) fed each level -- that part can never break, with a
+# shared scale or without one. What the shared scale actually buys is that a
+# gap MEANS ONLY ONE THING: on one (mu, sd), "Defense & Luck" collapses to
+# -15*(xt-target)/sd, a pure function of the raw xt-target difference, so the
+# same physical luck swing prices identically for every pitcher on the board.
+# Giving Target and xT their own moments (the "obvious" per-quantity choice,
+# and worth resisting the next time this reads odd) drags each level's own mu
+# and sd into the gap, so the SAME luck swing prices differently depending on
+# a pitcher's unrelated absolute level -- every individual card still adds up,
+# but the board as a whole is quietly inconsistent, which is worse because
+# nothing about it looks wrong. See test_arsenal.py's shared-vs-per-level
+# tests for the worked case.
+pt["RunsAllowed100"] = ar.to_display(pt["target"].values, mu["adj"], sd["adj"])
+pt["ExpRunsAllowed100"] = ar.to_display(pt["xt"].values, mu["adj"], sd["adj"])
 
 # whiff + location fingerprint
 sw = f25[f25["PitchCall"].isin(SWING)].groupby("PitcherId")["PitchCall"]
@@ -119,7 +155,27 @@ for _, r in staff.iterrows():
                         stuff_attr=[(f, float(v)) for f, v in attr[:3] + attr[-2:]],
                         stuff_nohand=round(r["Stuff100_nohand"], 1),
                         pitch_nohand=round(r["Pitch100_nohand"], 1),
-                        stuff_attr_nohand=[(f, float(v)) for f, v in attr_nh[:3] + attr_nh[-2:]]))
+                        stuff_attr_nohand=[(f, float(v)) for f, v in attr_nh[:3] + attr_nh[-2:]],
+                        # Adj Results ladder. Display levels are full precision
+                        # (not pre-rounded to 1dp like adjres/stuff/loc above):
+                        # the board card apportions them against its own
+                        # rounded score cells the same way it already does for
+                        # Location+'s locWhere rows, and handing it a
+                        # pre-rounded input would just add a second rounding
+                        # step ahead of that one.
+                        #
+                        # Raw units are runs per 100 pitches (mean Target/xT *
+                        # 100): the mean-per-pitch value the model actually
+                        # carries is ~0.00x and unreadable on a card, while
+                        # runs/100 lands in the +/-10ish range for a real
+                        # qualified pitcher (script 01's own C0 population sd
+                        # is ~2.8 runs/100), which a coach can read at a
+                        # glance.
+                        res_runs_allowed=float(r["RunsAllowed100"]),
+                        res_exp_runs_allowed=float(r["ExpRunsAllowed100"]),
+                        res_runs_allowed_raw=round(float(r["target"]) * 100, 2),
+                        res_exp_runs_allowed_raw=round(float(r["xt"]) * 100, 2),
+                        res_adj_results_raw=round(float(r["adj"]) * 100, 2)))
     print(f"  {r['name']:<24}({r['hand'][0]}) FF={n:>4} AdjRes={r['AdjRes100']:>5.0f} "
           f"Stuff+={r['Stuff100']:>5.0f} Loc+={r['Loc100']:>5.0f} Pitch+={r['Pitch100']:>5.0f} "
           f"whiff={('%.0f%%' % (r['whiff'] * 100)) if pd.notna(r['whiff']) else ' NA'} {flag}")

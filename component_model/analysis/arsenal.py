@@ -60,6 +60,40 @@ def display_scale(pitcher_means, floor_mask) -> tuple[float, float]:
     return float(vals.mean()), float(vals.std(ddof=1))
 
 
+def pitch_display_scale(values) -> tuple[float, float]:
+    """Population moments for a PITCH-LEVEL display scale.
+
+    This is the sibling of display_scale, and the two must never be confused
+    for one another. display_scale takes one MEAN PER PITCHER and describes
+    the spread of pitcher averages -- that spread is small (a season of pitches
+    averages out), so it is the right zero point and divisor for a SEASON
+    score, where "100" means "an average pitcher's average pitch location."
+
+    A single pitch is not a season average. Individual pitch locations vary
+    enormously -- a pitcher who commands the ball still misses the target on
+    any given throw -- so the spread of raw per-pitch values is much wider
+    than the spread of pitcher means for the same population. Reusing
+    display_scale's (mu, sd) for a per-pitch number divides by a divisor built
+    for averages, which is why the shipped bug put individual four-seams
+    anywhere from -281.5 to +232.7 on a scale that was supposed to be 100+/-15:
+    the pitcher-mean sd (0.008769) was 7.8x too small for the spread of single
+    pitches (0.0682).
+
+    values: the raw run values (pitcher's perspective, lower = better) of
+    EVERY QUALIFYING PITCHER'S PITCHES -- already filtered to the same
+    qualifying population display_scale's pitcher_means/floor_mask select, so
+    the season scale and the pitch scale describe the same set of pitchers.
+    No separate floor_mask parameter here: filtering happens once, by the
+    caller, against loc_qualified_ids, rather than being re-derived from a
+    per-pitch frame that has no pitcher-level sample-size column of its own.
+    """
+    vals = np.asarray(values, dtype=float)
+    vals = vals[~np.isnan(vals)]
+    if vals.size < 2:
+        raise ValueError(f"need 2+ pitches to set a pitch-level scale, got {vals.size}")
+    return float(vals.mean()), float(vals.std(ddof=1))
+
+
 def contributions(feature_values, scaler_mean, scaler_scale, coef, baseline_z, sd):
     """Per-feature contribution to Stuff+, in display points.
 
@@ -243,10 +277,17 @@ def _side_band(s):
 
 def _region_label(hband, sband):
     if hband == "off" or sband == "off":
-        return "Off the plate"
+        return "Out of the zone"
     if sband == "middle":
         return f"{hband}, middle"
     return f"{hband} and {sband}"
+
+
+# Order to display a pitcher's own count-bucket frequency in, everywhere a
+# byCount list gets built (a real region row or the pooled "Everywhere else"
+# row). Reading order a coach expects: ahead counts first, since those are the
+# ones a pitcher chooses to expand a location to.
+COUNT_BUCKET_ORDER = ("ahead", "even", "behind")
 
 
 def count_bucket(count12):
@@ -262,7 +303,7 @@ def count_bucket(count12):
 
 
 def league_cell_table(league, qualified_ids=None):
-    """Share and mean location value per region and count, over the comparison
+    """Share and mean location value per region, over the comparison
     population.
 
     A separate step because of WHEN it has to run: 14_pitcher_pages narrows every
@@ -273,6 +314,82 @@ def league_cell_table(league, qualified_ids=None):
     qualified_ids restricts it to the pitchers the display scale was built from,
     so the population a pitcher is compared against is the population his score
     is measured against.
+
+    COUNT COLLAPSED, ON PURPOSE. This table used to key on (region, count
+    bucket), on the reasonable-sounding theory that a location map might value
+    a spot differently depending on the count it was thrown in. Checked against
+    the published bundle: it doesn't. The map is fit POOLED across counts, so
+    in-zone league values come out identical to four decimals across
+    ahead/even/behind. The occupancy term (w - w*)(v* - mu), summed over count
+    buckets against a common v*, telescopes to the same term computed once on
+    the combined region share -- the count split re-sliced rows without moving
+    a single point of the grade. It also did real damage: dividing each
+    region's share three ways pushed many (region, count) cells below
+    min_share and into the pooled "Everywhere else" row. Collapsing to one row
+    per region took the number of named spots falling under that threshold to
+    ZERO across a full 18-pitcher staff, and rows per pitcher from a median of
+    22 down to 10.
+
+    A coach who wants the count breakdown back still gets it: see
+    `location_decomposition`'s `byCount`, nested under each region row as a
+    frequency-only breakdown of the pitcher's OWN usage. It is no longer a
+    grouping key of this table or of the region rows, because the model does
+    not condition on it and re-adding it here would just reopen the same
+    min_share problem this collapse fixed. Do not restore the (region, bucket)
+    grouping to "add the count dimension back" -- it was never carrying a
+    location-value distinction, only slicing rows thinner.
+
+    WEIGHTING, and why it has to match loc_mu exactly. loc_mu (14_pitcher_pages.py)
+    is the mean of PER-PITCHER means: one vote per pitcher, regardless of how many
+    pitches he threw. A plain pitch-level share/mean here would instead give more
+    say to pitchers who threw more, and `location_baseline` sums w*(v* - loc_mu)
+    over this table -- if w* and v* are pitch-weighted while mu is pitcher-weighted,
+    that sum is not zero by construction, it is the gap between "the average pitch"
+    and "the average pitcher", which on a real staff of 18 pitchers priced out to a
+    constant +2.4 display points for everyone, masquerading as a location effect.
+
+    So every pitcher gets one vote here too, split across the cells he threw to in
+    proportion to his own pitch count. With P pitchers, pitcher p's share of cell c
+    written s_pc and his mean loc in that cell v_pc:
+
+        w*_c = (1/P) * sum_p s_pc              (mean per-pitcher share of the cell)
+        v*_c = (sum_p s_pc v_pc) / (sum_p s_pc) (that same weighting applied to loc)
+
+    which is implemented by giving every pitch a weight of 1/(P * n_p) (n_p = that
+    pitcher's total pitches in this frame), summing the weight within a cell for
+    share and the weight-times-loc within a cell (divided by the cell's weight) for
+    value. That reduces to the two expressions above: summing 1/(P*n_p) over a
+    pitcher's rows in cell c gives s_pc/P, so summing over pitchers gives w*_c;
+    the weighted mean of loc with those same weights is v*_c by definition. Both
+    share and value have to change together -- reweighting only `share` and
+    leaving `value` a plain per-pitch mean does not make sum(w* v*) equal loc_mu.
+
+    `n` stays a raw pitch count (not weighted): it is sample-size display, not a
+    term in the identity.
+
+    COUNT_WEIGHT, the league counterpart of a pitcher's own `byCount` share.
+    location_decomposition nests each region row's byCount with the pitcher's
+    OWN count-bucket frequency (his share of pitches to that region thrown
+    ahead/even/behind). A coach asking "is 45% behind unusual" needs D1's own
+    split of the SAME region the same way, or the frequency has nothing to sit
+    next to.
+
+    The denominator has to match: his share is per-region (the three buckets
+    sum to 1.0 for one region, not across his whole arsenal), so the league
+    figure has to be normalized the same way -- of D1's one-vote-per-pitcher
+    weight in this region, what fraction sits in each count bucket. That is
+    `count_weight[(region, bucket)] / share[region]`, and because
+    `count_weight` is grouped by the same (region, bucket) partition of the
+    same weighted rows that `share` sums over, the three bucket weights for one
+    region always sum to exactly `share[region]` -- so the normalized fractions
+    always sum to 1.0 for that region, same as his own.
+
+    `count_weight` is returned RAW (not normalized here) rather than as
+    already-divided shares, because the pooled "Everywhere else" row has to
+    combine several regions' count weights before normalizing (sum raw weight
+    per bucket across the pooled regions, then divide by the pooled region's
+    total leagueShare) -- dividing per-region first and averaging the
+    quotients would not equal that.
     """
     df = league.copy()
     if qualified_ids is not None:
@@ -284,8 +401,21 @@ def league_cell_table(league, qualified_ids=None):
     bb = _side_band(rel)
     df["region"] = [_region_label(a, b) for a, b in zip(hh, bb)]
     df["bucket"] = [count_bucket(c) for c in df["count12"]]
-    g = df.groupby(["region", "bucket"])
-    return {"share": g.size() / len(df), "value": g["loc"].mean(), "n": int(len(df))}
+
+    # One vote per pitcher: 1/(P * n_p) per pitch, so a pitcher's rows sum to
+    # 1/P no matter how many pitches he threw. No row can divide by zero here
+    # -- pitcher_n is a count over rows actually present in df, so it is at
+    # least 1 for every pitcher that appears at all.
+    n_pitchers = df["PitcherId"].nunique()
+    pitcher_n = df.groupby("PitcherId")["PitcherId"].transform("size")
+    df["_w"] = 1.0 / (n_pitchers * pitcher_n)
+    df["_wl"] = df["_w"] * df["loc"]
+
+    g = df.groupby("region")
+    share = g["_w"].sum()
+    value = g["_wl"].sum() / share
+    count_weight = df.groupby(["region", "bucket"])["_w"].sum()
+    return {"share": share, "value": value, "n": int(len(df)), "count_weight": count_weight}
 
 
 def location_baseline(league, loc_mu, loc_sd):
@@ -299,6 +429,14 @@ def location_baseline(league, loc_mu, loc_sd):
     so a per-pitcher "baseline" computed that way would be a coverage artifact
     dressed as a league constant. Computing it here, from the league table
     alone, makes that mistake unavailable to a caller.
+
+    When mu is loc_mu -- the zero point 14_pitcher_pages.py actually publishes,
+    the mean of per-pitcher means -- this must come out to (approximately) zero.
+    sum_c w*_c v*_c telescopes back to that same mean of per-pitcher means (see
+    league_cell_table's docstring), so sum_c w*_c(v*_c - loc_mu) is loc_mu minus
+    itself. A nonzero result here means the table's weighting and loc_mu's
+    weighting have drifted apart again, not that D1 has a real "own location
+    mix" effect: see test_location_baseline_is_zero_when_weighted_like_loc_mu.
     """
     table = league if isinstance(league, dict) else league_cell_table(league)
     lg_share, lg_value = table["share"], table["value"]
@@ -346,6 +484,37 @@ def location_decomposition(sub, league, loc_mu, loc_sd, min_share=0.01):
 
     Identity, exact to float error:
       sum(occupancyPoints) + sum(placementPoints) + baseline == score - 100
+
+    ONE ROW PER REGION, COUNT NESTED. This used to emit one row per (region,
+    count bucket), median 22 rows per pitcher. See league_cell_table's
+    docstring for why that was removed: the location map is pooled across
+    counts, so the split re-sliced the same points into thinner rows and
+    pushed real spots below min_share for no benefit. Collapsing to one row
+    per region does not touch a single point total -- occ/plac/points are
+    recomputed at the region grain the same way they were at the (region,
+    count) grain, and the underlying algebra is exactly the telescoping sum
+    league_cell_table's docstring describes, so the identity above is
+    unaffected by the collapse.
+
+    A coach who wants to know how a region's usage splits by count still can:
+    each row carries `byCount`, a list of {count, n, share} nested under it,
+    where `share` is that count's fraction of the region's OWN pitches (not of
+    his whole arsenal). `byCount` is deliberately frequency-only -- no points.
+    The model returns the same value for a spot regardless of the count it was
+    thrown in, so "per-count points" would just be this row's `points`
+    re-apportioned by frequency; showing that would look like the grade knows
+    about counts, when it does not. If that changes (a count-aware location
+    model), byCount is where a real per-count value belongs -- not before.
+
+    Each byCount entry ALSO carries `leagueShare` when the league table has any
+    weight in that (region, bucket) cell: D1's own count-bucket split of that
+    same region, normalized the same way his `share` is (the three buckets of
+    one region sum to 1.0 on both sides). It is omitted, not zero, for a bucket
+    where the league table simply has no row -- see league_cell_table's
+    count_weight docstring for why that is different from a real 0%. A bundle
+    built before this field existed, or a byCount entry where the league truly
+    never lands, both just render his own figure with nothing to compare it
+    against.
     """
     def cells(df):
         s = _side_relative(df["PlateLocSide"].values, df["BatterSide"].values)
@@ -364,8 +533,32 @@ def location_decomposition(sub, league, loc_mu, loc_sd, min_share=0.01):
 
     n = len(sub)
     his = {}
-    for (region, bucket), g in sub.groupby(["region", "bucket"]):
-        his[(region, bucket)] = (len(g) / n, float(g["loc"].mean()), int(len(g)))
+    for region, g in sub.groupby("region"):
+        his[region] = (len(g) / n, float(g["loc"].mean()), int(len(g)))
+
+    def by_count(region, region_n, lg_w):
+        """His own count-bucket frequency within one region: {count, n,
+        share}, share as a fraction of region_n. No points -- see the
+        docstring above. Empty when he never throws to the region at all.
+
+        `lg_w` is this region's own leagueShare (already computed by `terms`),
+        the denominator that normalizes count_weight into D1's own per-region
+        count split -- see league_cell_table's count_weight docstring for why
+        that has to be the region-level weight and not a re-lookup here.
+        """
+        if region_n == 0:
+            return []
+        counts = sub.loc[sub["region"] == region, "bucket"].value_counts()
+        lg_shares = _league_by_count_share(table, region, lg_w)
+        result = []
+        for b in COUNT_BUCKET_ORDER:
+            if b not in counts.index:
+                continue
+            entry = {"count": b, "n": int(counts[b]), "share": float(counts[b]) / region_n}
+            if b in lg_shares:
+                entry["leagueShare"] = lg_shares[b]
+            result.append(entry)
+        return result
 
     def terms(cell, share, his_value):
         """Occupancy, placement and points for one cell, all in display points."""
@@ -380,16 +573,15 @@ def location_decomposition(sub, league, loc_mu, loc_sd, min_share=0.01):
                 lg_w, lg_v)
 
     rows, dropped = [], []
-    for cell in sorted(set(his) | set(lg_share.index)):
-        share, his_value, count = his.get(cell, (0.0, float("nan"), 0))
+    for region in sorted(set(his) | set(lg_share.index)):
+        share, his_value, count = his.get(region, (0.0, float("nan"), 0))
         if share == 0.0:
             # He never throws here but D1 does. Real occupancy, no placement,
             # and no line of its own.
-            his_value = float(lg_value.get(cell, loc_mu))
-        occ, plac, points, lg_w, lg_v = terms(cell, share, his_value)
+            his_value = float(lg_value.get(region, loc_mu))
+        occ, plac, points, lg_w, lg_v = terms(region, share, his_value)
         row = {
-            "region": cell[0],
-            "count": cell[1],
+            "region": region,
             "n": count,
             "share": float(share),
             "leagueShare": lg_w,
@@ -398,6 +590,7 @@ def location_decomposition(sub, league, loc_mu, loc_sd, min_share=0.01):
             "placementPoints": float(plac),
             "value": float(his_value),
             "leagueValue": float(lg_v),
+            "byCount": by_count(region, count, lg_w),
         }
         if share < min_share or share == 0.0:
             dropped.append(row)
@@ -419,7 +612,6 @@ def location_decomposition(sub, league, loc_mu, loc_sd, min_share=0.01):
         lg_w = sum(r["leagueShare"] for r in dropped)
         rows.append({
             "region": "Everywhere else",
-            "count": "all",
             "n": int(sum(r["n"] for r in dropped)),
             "share": float(share),
             "leagueShare": float(lg_w),
@@ -432,8 +624,73 @@ def location_decomposition(sub, league, loc_mu, loc_sd, min_share=0.01):
             "value": _pooled_mean(dropped, "value", "share", fallback_w="leagueShare"),
             "leagueValue": _pooled_mean(dropped, "leagueValue", "leagueShare",
                                         fallback_w="share"),
+            # Combined from the pooled regions' own byCount breakdowns, rather
+            # than left empty, so "Everywhere else" still answers the count
+            # question -- a region only lands here because it is rare, not
+            # because its count breakdown stopped mattering.
+            "byCount": _pool_by_count(dropped),
         })
     return rows
+
+
+def _league_by_count_share(table, region, region_lg_share):
+    """D1's own count-bucket split of one region, normalized to that region's
+    own leagueShare so the three buckets sum to 1.0 -- the league counterpart
+    of `by_count`'s his-own-share. `region_lg_share` is the already-computed
+    leagueShare for this region (0.0 when the league never lands there at
+    all, or when the region isn't in the league table's index), never
+    re-derived from the table, so this agrees exactly with the row's own
+    leagueShare field rather than a second, possibly-KeyError-prone lookup.
+
+    Returns a plain {bucket: fraction} dict rather than the list shape
+    `by_count` builds, since callers merge it bucket-by-bucket into rows they
+    already own.
+    """
+    if region_lg_share <= 0:
+        return {}
+    cw = table.get("count_weight")
+    if cw is None:
+        return {}
+    out = {}
+    for b in COUNT_BUCKET_ORDER:
+        key = (region, b)
+        if key in cw.index:
+            out[b] = float(cw[key]) / region_lg_share
+    return out
+
+
+def _pool_by_count(dropped):
+    """Sum the byCount breakdowns of every pooled region into one frequency
+    table, keyed by count bucket rather than region. Combines both sides:
+    his own n/share (raw pitch counts, summed directly) and D1's leagueShare
+    (recovered as raw weight -- bc's per-region leagueShare times that row's
+    own leagueShare -- summed across the pooled regions, then renormalized by
+    the pooled row's total leagueShare). Renormalizing the raw weight sum
+    rather than averaging the per-region fractions is required: the pooled
+    regions carry different amounts of league weight, so an unweighted average
+    of fractions would not equal the true combined split.
+    """
+    n_totals: dict[str, int] = {}
+    lg_totals: dict[str, float] = {}
+    for r in dropped:
+        for bc in r["byCount"]:
+            n_totals[bc["count"]] = n_totals.get(bc["count"], 0) + bc["n"]
+            if "leagueShare" in bc:
+                raw = bc["leagueShare"] * r["leagueShare"]
+                lg_totals[bc["count"]] = lg_totals.get(bc["count"], 0.0) + raw
+    total_n = sum(n_totals.values())
+    total_lg = sum(r["leagueShare"] for r in dropped)
+    if total_n == 0:
+        return []
+    result = []
+    for b in COUNT_BUCKET_ORDER:
+        if b not in n_totals:
+            continue
+        entry = {"count": b, "n": n_totals[b], "share": float(n_totals[b]) / total_n}
+        if b in lg_totals and total_lg > 0:
+            entry["leagueShare"] = float(lg_totals[b]) / total_lg
+        result.append(entry)
+    return result
 
 
 def _pooled_mean(rows, value_key, weight_key, fallback_w):

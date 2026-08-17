@@ -195,9 +195,10 @@ from webapp_publisher.build_pitcher_bundle import enrich_loc_where
 
 
 def _where_rows():
-    return [{"region": "Down and away", "count": "ahead", "n": 41, "share": 0.31,
+    return [{"region": "Down and away", "n": 41, "share": 0.31,
              "leagueShare": 0.18, "points": 14.0, "occupancyPoints": 9.0,
-             "placementPoints": 4.5, "value": -0.004, "leagueValue": -0.002}]
+             "placementPoints": 4.5, "value": -0.004, "leagueValue": -0.002,
+             "byCount": [{"count": "ahead", "n": 41, "share": 1.0}]}]
 
 
 def _where_pages(arsenal):

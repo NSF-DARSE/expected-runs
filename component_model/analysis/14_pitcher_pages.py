@@ -125,13 +125,19 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
                 outings.append({"date": str(o["date"]), "type": tname,
                                 "n": int(o["n"]), "stuff": float(o["stuff"])})
             grades = ar.to_display(sub["ridge_pred"].values, mu, sd)
-            # Per-pitch Location+, through the SAME transform as the season
-            # number, per the one-scale rule in arsenal.py: a second scale
-            # calibrated on single pitches would make a pitch and its season
-            # average incomparable. Like the Stuff+ grade `g`, it spreads much
-            # wider than the season figure, because the scale's moments come
-            # from pitcher means. Fastball only, since Location+ is.
-            loc_grades = (ar.to_display(sub["loc"].values, state["loc_mu"], state["loc_sd"])
+            # Per-pitch Location+ uses its OWN pitch-level scale (loc_pitch_mu/
+            # loc_pitch_sd), NOT the season pair (loc_mu/loc_sd). This is a
+            # deliberate departure from Stuff+'s one-scale rule: for Location+
+            # the season scale's moments come from the spread of PER-PITCHER
+            # MEANS, which is far tighter than the spread of individual pitches
+            # (measured sd 0.008769 vs 0.0682), so routing a single pitch
+            # through the season scale put real pitches at -281.5 to +232.7 on
+            # a 100+/-15 page. The pitch-level scale is still centered so 100
+            # means "an average pitch" the same way the season scale's 100
+            # means "an average pitcher" -- just with a divisor sized for the
+            # thing actually being displayed. See arsenal.pitch_display_scale.
+            # Fastball only, since Location+ is.
+            loc_grades = (ar.to_display(sub["loc"].values, state["loc_pitch_mu"], state["loc_pitch_sd"])
                           if tname == "FF" else [None] * len(sub))
             dates = pd.to_datetime(sub["Date"]).dt.strftime("%Y-%m-%d").values
             for (_, p), g, lg, d in zip(sub.iterrows(), grades, loc_grades, dates):
@@ -164,6 +170,18 @@ def build_model_artifact(fitted_by_type: dict, feats: list[str]) -> dict:
                 # per-type artifact keeps a uniform shape.
                 "displayLocMu": s.get("loc_mu"),
                 "displayLocSd": s.get("loc_sd"),
+                # PITCH-LEVEL Location+ moments -- deliberately separate fields,
+                # never overwriting displayLocMu/displayLocSd above. Those two
+                # are what the SEASON Location+ score is built from (spread of
+                # per-pitcher means) and must not move. These describe the
+                # spread of individual pitches instead, which is what the
+                # per-pitch tooltip number actually needs. Named with the
+                # "Pitch" infix specifically so a reader cannot mistake one
+                # pair for the other. Optional (None when absent, e.g. a
+                # non-fastball type or a state that predates this field) so a
+                # frontend built against an older bundle degrades gracefully.
+                "displayPitchLocMu": s.get("loc_pitch_mu"),
+                "displayPitchLocSd": s.get("loc_pitch_sd"),
                 "sampleFloor": SAMPLE_FLOOR,
                 "nQualified": s["n_qualified"],
             }
@@ -223,6 +241,18 @@ def attach_location(pit: pd.DataFrame, state: dict, tags, fc_module, season_year
     are the same qualified-population moments 08_staff_scores.py uses for Loc100
     (its `n_ff >= 100` is this module's SAMPLE_FLOOR).
 
+    ALSO derives a SECOND, pitch-level pair (loc_pitch_mu/loc_pitch_sd) for the
+    per-pitch Location+ shown on the strike-zone tooltip. This must stay a
+    separate pair from loc_mu/loc_sd, never collapsed back into one:
+    loc_mu/loc_sd come from the spread of PER-PITCHER SEASON MEANS and are
+    correct for the season score, which compares a pitcher's mean against the
+    distribution of pitcher means. Applying that same (mu, sd) to an individual
+    pitch is the bug this fix corrects -- a season mean is stable and a single
+    pitch is not, so the season scale's divisor is far too small for pitch-level
+    values (measured: pitcher-mean sd 0.008769 vs pitch-level sd 0.0682, a 7.8x
+    gap) and pushed real pitches to -281.5 or +232.7 on a 100+/-15 page. See
+    arsenal.pitch_display_scale's docstring for the full argument.
+
     floor_n is a parameter rather than the module constant only so tests can drive
     this on small synthetic frames; production passes SAMPLE_FLOOR.
     """
@@ -230,6 +260,7 @@ def attach_location(pit: pd.DataFrame, state: dict, tags, fc_module, season_year
     if tags is not None:
         season["loc"] = np.nan
         state["loc_mu"] = state["loc_sd"] = None
+        state["loc_pitch_mu"] = state["loc_pitch_sd"] = None
         return
     ff_all = pit[ar.type_mask(pit, tags)].copy()
     ff_all = ff_all[ff_all["PlateLocSide"].notna() & ff_all["PlateLocHeight"].notna()]
@@ -253,7 +284,17 @@ def attach_location(pit: pd.DataFrame, state: dict, tags, fc_module, season_year
     # The population a pitcher is compared against has to be the one the scale's
     # zero point came from, or the breakdown carries a constant offset that is
     # about the population gap rather than about him.
-    state["loc_qualified_ids"] = set(per_pitcher.index[per_pitcher["size"] >= floor_n])
+    qualified_ids = set(per_pitcher.index[per_pitcher["size"] >= floor_n])
+    state["loc_qualified_ids"] = qualified_ids
+
+    # Pitch-level scale, over the SAME qualifying population loc_mu/loc_sd used
+    # (same per_pitcher["size"] >= floor_n filter), so the season scale and the
+    # per-pitch scale describe the same set of pitchers and differ only in
+    # whether they were built from pitcher means or raw pitches. See
+    # arsenal.pitch_display_scale's docstring for why this has to be a second,
+    # separately-named pair rather than reusing loc_mu/loc_sd.
+    qualified_pitches = season.loc[season["PitcherId"].isin(qualified_ids), "loc"].values
+    state["loc_pitch_mu"], state["loc_pitch_sd"] = ar.pitch_display_scale(qualified_pitches)
 
 
 def main() -> int:

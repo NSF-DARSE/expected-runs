@@ -39,8 +39,30 @@ def assign_ids(staff: list[dict]) -> dict[str, int]:
     return {name: i + 1 for i, name in enumerate(names)}
 
 
+def _res_ladder(s: dict) -> dict | None:
+    """Adj Results' ladder (Runs Allowed -> Expected Runs Allowed -> Adj
+    Results), if 08_staff_scores.py emitted one. Absent entirely -- not a key
+    with nulls in it -- on a staff_scores.json from before the ladder existed,
+    the same way locWhere/locBaseline are absent rather than null on an older
+    pitcher file. That lets the frontend tell "no ladder shipped for this
+    build" from "ladder shipped but a level came back empty" and fall back to
+    prose only for the former.
+    """
+    keys = ("res_runs_allowed", "res_exp_runs_allowed", "res_runs_allowed_raw",
+            "res_exp_runs_allowed_raw", "res_adj_results_raw")
+    if any(k not in s for k in keys):
+        return None
+    return {
+        "runsAllowed": s["res_runs_allowed"],
+        "expRunsAllowed": s["res_exp_runs_allowed"],
+        "runsAllowedRaw": s["res_runs_allowed_raw"],
+        "expRunsAllowedRaw": s["res_exp_runs_allowed_raw"],
+        "adjResultsRaw": s["res_adj_results_raw"],
+    }
+
+
 def _row(s: dict, pid: int) -> dict:
-    return to_native({
+    row = {
         "id": pid,
         "name": s["name"],
         "hand": s["hand"],
@@ -58,7 +80,11 @@ def _row(s: dict, pid: int) -> dict:
         "locFlag": s["loc_flag"],
         "stuffAttr": [[f, v] for f, v in s["stuff_attr"]],
         "stuffAttrNoHand": [[f, v] for f, v in s["stuff_attr_nohand"]],
-    })
+    }
+    ladder = _res_ladder(s)
+    if ladder is not None:
+        row["resLadder"] = ladder
+    return to_native(row)
 
 
 def build_bundle(staff_scores: dict, *, season: int, data_through: str, built_iso: str) -> dict[str, dict]:

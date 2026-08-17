@@ -182,3 +182,60 @@ def test_type_mask_treats_two_seam_as_sinker():
         "is_ff": [False, False, False],
     })
     assert list(ar.type_mask(pit, {"Sinker", "TwoSeamFastBall"})) == [True, True, False]
+
+
+# ---- Adj Results ladder (08_staff_scores.py): Target -> xT -> adjT --------
+#
+# The ladder shows the same C2 quantity (adjT, Adj Results) at the two earlier
+# stages it is built from (RESULTS.md, "The fair criterion"): C0 raw Target,
+# C1 xT. Summing a level plus the two gaps back to the far endpoint is pure
+# telescoping algebra (a + (b-a) + (c-b) == c) and holds no matter what (mu,
+# sd) went into a, b and c individually -- that part can never break. What
+# shared moments actually buy is that a GAP VALUE MEANS ONLY ONE THING: with
+# one (mu, sd) for every level, "Defense & Luck" collapses to
+# -15*(xt-target)/sd, a pure function of the raw xt-target difference and
+# nothing else, so the same physical luck swing prices identically everywhere
+# on the board. Per-level moments (the "obvious" per-quantity choice a future
+# reader will be tempted to make) drag in each level's own mu and sd, so the
+# SAME raw luck swing prices differently depending on the pitcher's unrelated
+# absolute level -- a real inconsistency a coach could eventually notice, even
+# though every individual card still closes arithmetically. That is the
+# "lying in a way nobody could see": each card is locally consistent, and the
+# whole board is not.
+
+def test_shared_scale_ladder_telescopes_exactly():
+    mu, sd = 0.0016, 0.0194  # the adjT (C2) population moments, per RESULTS.md
+    target, xt, adj = 0.0055, 0.0011, -0.0009
+    runs_allowed = ar.to_display(target, mu, sd)
+    exp_runs_allowed = ar.to_display(xt, mu, sd)
+    adj_results = ar.to_display(adj, mu, sd)
+    gap_defense_luck = exp_runs_allowed - runs_allowed
+    gap_opponent = adj_results - exp_runs_allowed
+    assert runs_allowed + gap_defense_luck + gap_opponent == pytest.approx(adj_results)
+
+
+def test_shared_scale_prices_the_same_luck_swing_identically():
+    """The property a shared scale buys: two pitchers with the IDENTICAL
+    (xt - target) gap -- the same physical luck/defense swing -- must get the
+    identical 'Defense & Luck' point value, regardless of where their raw
+    numbers otherwise sit.
+    """
+    mu, sd = 0.0016, 0.0194
+    pairs = [(0.0055, 0.0011), (0.0002, -0.0042)]  # both: xt - target == -0.0044
+    gaps = [ar.to_display(xt, mu, sd) - ar.to_display(target, mu, sd) for target, xt in pairs]
+    assert gaps[0] == pytest.approx(gaps[1])
+
+
+def test_per_level_scale_prices_the_same_luck_swing_differently():
+    """Regression guard for the change a future reader will be tempted to
+    make: giving Target and xT their OWN population (mu, sd) instead of
+    reusing adjT's. Each individual card still closes (see the telescoping
+    test above -- that identity cannot break), but the SAME raw luck swing
+    now prices differently depending on unrelated absolute level, which is
+    exactly the inconsistency shared scale exists to rule out.
+    """
+    mu_t, sd_t = 0.002, 0.028    # Target's own population moments
+    mu_x, sd_x = 0.0016, 0.020   # xT's own population moments
+    pairs = [(0.0055, 0.0011), (0.0002, -0.0042)]  # both: xt - target == -0.0044
+    gaps = [ar.to_display(xt, mu_x, sd_x) - ar.to_display(target, mu_t, sd_t) for target, xt in pairs]
+    assert gaps[0] != pytest.approx(gaps[1])

@@ -4,7 +4,9 @@ Everything numerically load-bearing is defined here exactly once:
   - data loading (dedup on PitchUID, keep first) with a local parquet cache
   - xT: luck/defense-stripped expected run value (EV/LA map for balls in play)
   - adjT: opponent-adjusted xT (league means + batter effects shrunk toward league)
-  - the fixed Stuff+ reference (Ridge alpha=10 on 12 physical features, trained 2024)
+  - the fixed Stuff+ reference (Ridge alpha=10 on the FEATS physical features,
+    trained 2024; the count is deliberately not restated here, since it has
+    changed twice and the stale number outlived the truth both times)
   - the (x,z) plate-location run-value maps, pooled and count-conditioned
   - the qualified pitcher panel (100+ four-seam FF in both 2024 and 2025)
 
@@ -32,6 +34,25 @@ already (see RESULTS.md, deployment section) before review caught it:
     lower-is-better.
 When defining any new trait, score, or composite, state its orientation in a
 comment at the definition site.
+
+NAMING -- what these quantities are CALLED, which the sign block above does not
+cover and which has since produced its own repeat errors (three mislabels in one
+session, each caught in review):
+  - Target, xT and adjT are EXPECTED RUN VALUE, RELATIVE TO AN AVERAGE PITCHER.
+    Never call any of them "runs", "actual runs", or "runs allowed". Each pitch
+    is charged the change in run expectancy plus any runs that scored on it
+    (Target = RunsScored + ER_next - ER), so a double with nobody on costs about
+    +0.6 whether or not that runner ever scores.
+  - Pool means sit near ZERO by construction. Writing "runs per 100" without
+    "vs average" implies an absolute rate and is wrong.
+  - RA9 is the ONLY literal runs-allowed quantity here; "actual runs" is correct
+    for it and for nothing else.
+  - The three differ only in how much is replaced by expectation: Target = the
+    realized event valued by the RE table (luck included); xT = batted balls
+    replaced by the EV/LA-map value; adjT = xT with league mean and a shrunk
+    batter effect also removed. Distinguish Target as "unadjusted", not "actual".
+  - Prefer "run value" in any user-facing text: accurate, standard, and it does
+    not imply runs crossed the plate.
 """
 import argparse
 import os
@@ -44,9 +65,56 @@ from sklearn.linear_model import Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-FEATS = ["SpinRate", "Extension", "HorzBreak", "InducedVertBreak", "EffectiveVelo",
-         "RelHeight", "RelSide", "vertbreakdiff", "horzbreakdiff",
-         "velocity_differential", "is_lhp", "is_lhb"]
+# RelSpeed (real release velocity) replaced EffectiveVelo on 2026-08-17 after the
+# pre-registered gate passed (coach_extension_fix.py, n=826): EffectiveVelo is computed
+# FROM release speed and extension, so conditioning on it blocked the path extension works
+# through and left its coefficient at zero (P(more is better)=0.545). On RelSpeed the
+# ridge learns the tradeoff itself: Extension established more-is-better at P=1.000 over
+# 200 cluster-bootstrap refits, validity non-inferior (+0.002 +/- 0.003). EffectiveVelo
+# stays in USECOLS: it remains the "Velocity only" display baseline (the radar-gun
+# reference the models are measured against), just not a model input.
+# HorzBreak_arm / RelSide_arm are ARM-SIDE MIRRORED copies (LHP flipped), created in
+# stuff_ridge. The raw columns keep their names and values because downstream consumers
+# need them raw -- above all the coach-card scorer, whose per-hand weights expect the
+# native frame. Mirroring the raw columns in place corrupted his card's scores and turned
+# the v1-v2 tie into a fake rout (caught 2026-08-17 before shipping).
+# dev_relheight / dev_relside ADDED 2026-08-17 and are the COACH'S construct, adopted after
+# it beat ours on the fixed criterion. His hand-built card scores release side and height as
+# |value - typical for that hand|: a symmetric V, so an unusually high AND an unusually low
+# release earn credit, where our terms were monotone. Gated over 200 cluster-bootstrap
+# refits: the shipped set improves validity +0.0307 (adjT, CI [+0.0079,+0.0514], P=0.995)
+# and +0.0406 (Target, P=1.000) over the previous 12-feature set. Our monotone RelHeight and
+# RelSide_arm are KEPT alongside them -- adding his form beat swapping ours out, so the two
+# carry different information. Centres are the fixed DEV_CENTRES constants below, never
+# recomputed per frame.
+#
+# DROPPED 2026-08-17 for CONSTRUCT reasons, not predictive ones, and the distinction matters
+# because the numbers alone would not justify it:
+#   the three "vs his fastball" differentials -- their reference is the pitcher's own FASTEST
+#     pitch type, so on a four-seam they collapse to within-pitcher scatter about his own
+#     mean and average to ~0 per pitcher. Their non-inferiority test actually came in at
+#     P=0.910 against a 0.95 bar, i.e. we could NOT show removing them was free. They are
+#     dropped anyway: a feature that cannot be explained to a coach looking at a fastball
+#     does not belong in the fastball model, and a small unprovable predictive cost is an
+#     acceptable price for a feature list that means what it says. They stay in USECOLS for
+#     the multi-pitch work, where the same columns become meaningful against a real second
+#     pitch.
+#   is_lhb -- opponent context inside a pitch-quality score, which credits a pitcher for the
+#     batters he happened to face. Removing it also happened to help slightly (+0.004 on
+#     both criteria, P(better)=1.000), so this one cost nothing.
+FEATS = ["SpinRate", "Extension", "HorzBreak_arm", "InducedVertBreak", "RelSpeed",
+         "RelHeight", "RelSide_arm", "is_lhp", "dev_relheight", "dev_relside"]
+
+# Per-hand centres for the two deviation features, measured ONCE on the 2024 train year
+# (coach_release_gate.py) and frozen here. Keys are is_lhp (0 = RHP, 1 = LHP), values are
+# feet. These must NOT be recomputed from whatever frame is being scored: the score frame
+# (2024/2025) and the criterion frame (2025/2026) load separately, and centring each on its
+# own rows would silently give the two frames different features.
+DEV_CENTRES = {
+    "dev_relheight": {0: 5.781186546815588, 1: 5.7260303576615526},
+    "dev_relside": {0: 1.6516521778868811, 1: 1.807404618575344},
+}
+DEV_SRC = {"dev_relheight": "RelHeight", "dev_relside": "RelSide_arm"}
 FF_TYPES = {"Fastball", "FourSeamFastBall", "FourSeamFastball"}
 USECOLS = ["PitchUID", "Date", "Pitcher", "PitcherId", "PitcherThrows", "PitcherTeam",
            "Batter", "BatterSide", "BatterTeam", "Balls", "Strikes",
@@ -56,13 +124,12 @@ USECOLS = ["PitchUID", "Date", "Pitcher", "PitcherId", "PitcherThrows", "Pitcher
            "velocity_differential", "PlateLocSide", "PlateLocHeight", "League",
            "Level", "GameID", "Inning", "Top/Bottom", "PAofInning", "PitchofPA"]
 
-# Columns read when the extract has them and skipped when it does not. RelSpeed
-# is real release velocity: no model feature uses it (the ridge sees
-# EffectiveVelo and a differential whose level cancels), and it is display
-# context on the pitcher page only. It is optional because the extract the
-# scorer consumes is a trimmed subset of the pipeline's output, and the trim in
-# use through 2026-08 drops it. Requiring it here would make a source CSV that
-# every other script reads fine fail to load at all.
+# Read when the extract has them, skipped when it does not (see load_pitches).
+# Optional rather than required because the extract the scorer consumes is a
+# trimmed subset of the pipeline's output, and some trims drop RelSpeed;
+# requiring it here would make a source CSV every other script reads fine fail
+# to open at all. RelSpeed is a MODEL feature now, not the display-only column
+# it was when this list was written.
 OPTIONAL_COLS = ["RelSpeed"]
 
 RIDGE_ALPHA = 10
@@ -158,6 +225,10 @@ def load_pitches(args):
     """
     pair = getattr(args, "year_pair", (2024, 2025))
     cache = os.path.join(args.workdir, f"pitches_cache{_year_suffix(args)}.parquet")
+    # RelSpeed is a MODEL feature (FEATS) but optional at load so extracts that predate it
+    # still open; stuff_ridge then fails loudly on the missing column rather than here. A
+    # cache written before RelSpeed joined the read must be rebuilt, not served -- serving
+    # it would surface as a KeyError far from the cause.
     header = pd.read_csv(args.data, nrows=0).columns
     available = USECOLS + [c for c in OPTIONAL_COLS if c in header]
     if os.path.exists(cache):
@@ -165,9 +236,6 @@ def load_pitches(args):
         stale = [c for c in available if c not in cached.columns]
         if not stale:
             return cached
-        # A cache written before a column joined the read would otherwise serve a
-        # frame silently missing it, and the miss surfaces as an empty display
-        # value rather than an error. Rebuild instead of trusting the file.
         print(f"*** CACHE REBUILD: {cache} predates {', '.join(stale)} ***")
     df = pd.read_csv(args.data, usecols=available)
     df = df.dropna(subset=["PitchUID"]).drop_duplicates(subset="PitchUID", keep="first")
@@ -254,7 +322,19 @@ def stuff_ridge(df, return_model=False, pitch_mask=None):
     """Rows of one pitch type with complete features; adds ridge_pred
     (Ridge alpha=10, trained 2024). pitch_mask defaults to four-seams."""
     mask = df["is_ff"] if pitch_mask is None else pitch_mask
-    ff = df[mask].dropna(subset=FEATS + ["Target"]).copy()
+    ff = df[mask].copy()
+    # Arm-side frame for the two handedness-mirrored geometry features (see FEATS note):
+    # one estimable slope per feature instead of a pooled average over two opposite
+    # relationships (RelSide: RHP -0.0019 vs LHP +0.0034, P=1.000 they differ; HorzBreak:
+    # RHP mean +10.6 vs LHP -11.4, two separated modes). New columns, raw left intact.
+    ff["RelSide_arm"] = ff["RelSide"] * (1 - 2 * ff["is_lhp"])
+    ff["HorzBreak_arm"] = ff["HorzBreak"] * (1 - 2 * ff["is_lhp"])
+    # The coach's deviation-from-typical release terms (see FEATS note). Must come AFTER
+    # RelSide_arm exists, since dev_relside is centred in the arm-side frame, and BEFORE the
+    # dropna so rows missing a source column are cut once on the final feature list.
+    for out, src in DEV_SRC.items():
+        ff[out] = (ff[src] - ff["is_lhp"].map(DEV_CENTRES[out])).abs()
+    ff = ff.dropna(subset=FEATS + ["Target"])
     train = ff[ff["year"] == 2024]
     model = make_pipeline(StandardScaler(), Ridge(alpha=RIDGE_ALPHA))
     model.fit(train[FEATS].values, train["Target"].values)

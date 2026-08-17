@@ -117,7 +117,13 @@ Zq = ((qual[fc.FEATS].values - scaler.mean_) / scaler.scale_).mean(axis=0)
 # prediction and RE-Z-SCORES against the qualified population, so the display
 # mean/sd shift too. Orientation unchanged: run value is lower = better, so the
 # z negates (higher display = better). Existing scores are untouched. ----
-HAND = [fc.FEATS.index("is_lhp"), fc.FEATS.index("is_lhb")]
+# Derived from FEATS rather than naming both terms outright. This asked for
+# is_lhb's index unconditionally, so the day it left the feature set the whole
+# scorer stopped running -- and the failure was a ValueError deep in a
+# subprocess, not anything pointing at the model change that caused it. The
+# toggle's meaning is "take out whatever handedness terms the model has", which
+# is exactly one of them now and was two before.
+HAND = [i for i, f in enumerate(fc.FEATS) if f in ("is_lhp", "is_lhb")]
 KEEP = [i for i in range(len(fc.FEATS)) if i not in HAND]
 Zrow = (pt[fc.FEATS].values - scaler.mean_) / scaler.scale_
 hand_raw = Zrow[:, HAND] @ coefs[HAND]  # per-pitcher handedness piece of ridge_pred

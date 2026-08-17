@@ -133,7 +133,21 @@ DISPLAY_BAND = (40.0, 160.0)
 # point of tightness beyond that is pure downside: one real team's worst pitch
 # already grades 19.9, leaving under 10 points of headroom, and a genuinely awful
 # pitch on some other staff would abort a publish for no diagnostic gain.
-PITCH_GRADE_BAND = (1.0, 250.0)
+#
+# LOWER BOUND MOVED BELOW ZERO 2026-08-17. The floor of 1.0 above was doing two
+# jobs, and the reasoning above only justifies one of them. A single pitch can
+# legitimately grade below zero: the model changed to take release velocity as
+# a direct input, and an 80 mph "fastball" with -11.9 inches of induced vertical
+# break -- a breaking ball tagged FF, or a bad capture -- now grades -16.9. That
+# is the correct grade for that pitch, and aborting a publish over it is exactly
+# the "no diagnostic gain" case this comment already warns about.
+#
+# The unscaled-value job the floor was really doing does NOT survive the move,
+# since an unscaled ridge_pred of 0.1 sits inside any band with a negative
+# floor. So that check moved to where it belongs and works at any sign: the
+# SPREAD of the grades (see _check_scaled_spread). An unscaled bundle has every
+# |g| under 1; a display-scaled one cannot.
+PITCH_GRADE_BAND = (-100.0, 250.0)
 
 # avgVelo is the one number on the page in real units rather than on the display
 # scale, so the band is a units check, not a quality check. A mean RelSpeed that
@@ -191,6 +205,25 @@ def _check_velo(value, *, key, ptype):
             f"{key} avgVelo for {ptype} is {value}, outside the plausible "
             f"{low:g}-{high:g} mph range; check units and the RelSpeed join"
         )
+
+
+def _check_scaled_spread(values, *, key, field):
+    """Catch a bundle emitted on the raw ridge scale instead of 100+/-15.
+
+    This is the job PITCH_GRADE_BAND's positive floor used to do, moved off the
+    per-value bound so it keeps working now that a legitimate grade can be
+    negative. An unscaled ridge_pred is |v| < ~0.2 for every pitch, so the whole
+    series collapses near zero; a display-scaled series cannot, because the
+    transform centres it on 100. Checked on the maximum magnitude rather than
+    the mean so a single pitch is enough to prove the scale.
+    """
+    if not values:
+        return
+    if max(abs(v) for v in values) < 5.0:
+        raise ValueError(
+            f"{key} {field}: every value is under 5 in magnitude "
+            f"(max {max(abs(v) for v in values):.4f}); this is almost certainly "
+            f"the raw ridge scale, not the 100+/-15 display scale")
 
 
 def validate_pitcher_bundle(files: dict) -> None:
@@ -339,3 +372,5 @@ def validate_pitcher_bundle(files: dict) -> None:
             if len(p["f"]) != n_feats:
                 raise ValueError(f"{key} pitch feature array is {len(p['f'])}, expected {n_feats}")
             _check_display_band(p["g"], PITCH_GRADE_BAND, key=key, field="pitch grade (g)", ptype=p["t"])
+        _check_scaled_spread([p["g"] for p in body["pitches"] if p.get("g") is not None],
+                             key=key, field="pitch grade (g)")

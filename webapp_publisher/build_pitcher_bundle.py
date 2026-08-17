@@ -23,6 +23,17 @@ FEATURE_LABELS = {
     "velocity_differential": "Velo vs his fastball",
     "is_lhp": "Throws left",
     "is_lhb": "Batter hits left",
+    # Added 2026-08-17 with the feature-set change. The _arm columns are the
+    # arm-side-mirrored copies of the two above, which is a frame convention
+    # rather than a different trait, so they share the label a coach knows.
+    "RelSpeed": "Release velocity",
+    "HorzBreak_arm": "Horizontal break",
+    "RelSide_arm": "Release side",
+    # These sit in the same card as the plain release rows and must not read as
+    # a second copy of them: they are |value - typical for his hand|, so an
+    # unusually high and an unusually low release both score as deviation.
+    "dev_relheight": "Release height, deviation from typical",
+    "dev_relside": "Release side, deviation from typical",
 }
 
 PITCH_TYPE_LABELS = {

@@ -113,7 +113,22 @@ DEV_CENTRES = {
     "dev_relside": {0: 1.6516521778868811, 1: 1.807404618575344},
 }
 DEV_SRC = {"dev_relheight": "RelHeight", "dev_relside": "RelSide_arm"}
-FF_TYPES = {"Fastball", "FourSeamFastBall", "FourSeamFastball"}
+# "FastBall" and "Four-Seam" added 2026-08-17: both appear as TrackMan tags in the D1
+# extracts and were previously unrecognised, so those pitches were not counted as fastballs
+# at all -- neither for the is_ff model filter nor for the differential anchor below.
+FF_TYPES = {"Fastball", "FourSeamFastBall", "FourSeamFastball", "FastBall", "Four-Seam"}
+
+# ---- the "vs primary fastball" anchor, recomputed at load (see add_fastball_diffs) ----
+# Source column -> the differential column it feeds.
+DIFF_COLS = {"InducedVertBreak": "vertbreakdiff", "HorzBreak": "horzbreakdiff",
+             "RelSpeed": "velocity_differential"}
+# A fallback anchor group must clear this many pitches before it can win on mean velocity,
+# so a single mis-tagged 95mph "changeup" cannot become a pitcher's reference pitch.
+ANCHOR_MIN_N = 5
+# Columns written by add_fastball_diffs. Their presence is the cache-freshness marker: a
+# parquet written before this function existed carries the OLD differentials under the same
+# three names, and the column-presence check alone would happily serve them.
+ANCHOR_COLS = ["anchor_type", "anchor_n"]
 USECOLS = ["PitchUID", "Date", "Pitcher", "PitcherId", "PitcherThrows", "PitcherTeam",
            "Batter", "BatterSide", "BatterTeam", "Balls", "Strikes",
            "TaggedPitchType", "PitchCall", "TaggedHitType", "ExitSpeed", "Angle",
@@ -186,6 +201,10 @@ def load_pitches(args):
     if os.path.exists(cache):
         cached = pd.read_parquet(cache)
         stale = [c for c in available if c not in cached.columns]
+        # ANCHOR_COLS are the freshness marker for the recomputed differentials. Without this
+        # a pre-2026-08-17 cache passes the column check and silently serves the OLD
+        # single-fastest-pitch anchor under the same three column names.
+        stale += [c for c in ANCHOR_COLS if c not in cached.columns]
         if not stale:
             return cached
         print(f"*** CACHE REBUILD: {cache} predates {', '.join(stale)} ***")
@@ -208,7 +227,70 @@ def load_pitches(args):
     df["is_lhb"] = (df["BatterSide"] == "Left").astype(float)
     df["is_inplay"] = df["PitchCall"] == "InPlay"
     df["is_ff"] = df["TaggedPitchType"].isin(FF_TYPES)
+    df = add_fastball_diffs(df)
     df.to_parquet(cache, index=False)
+    return df
+
+
+def add_fastball_diffs(df):
+    """Recompute the three 'vs primary fastball' differentials on a robust anchor.
+
+    OVERRIDES vertbreakdiff / horzbreakdiff / velocity_differential as they arrive from the
+    source CSV. target_and_calculated_pipeline.py builds them against `FastestPitchType`,
+    which it defines as the tag containing the pitcher's SINGLE fastest pitch. Two things go
+    wrong with that, both measured on 2026 D1 (2026-08-17):
+
+      1. The anchor is tag-scoped, and 2436 of 5714 pitchers spread their fastballs over two
+         or more tags ("Fastball" and "FourSeamFastBall" being the usual pair). One radar
+         reading decides which tag wins, so for 409 pitchers the anchor was the MINORITY
+         fastball tag, covering under half their fastballs for 19% of them. Every
+         differential for every one of that pitcher's pitch types then measures against a
+         partial, unrepresentative fastball.
+      2. A max over noisy readings is not a robust statistic. 693 pitchers had a non-fastball
+         anchor; sinker (580) and two-seam (70) are defensible, but 11 changeups, 8 sliders
+         and a sweeper are not -- those are single hot readings or mis-tags.
+
+    The fix pools ALL of FF_TYPES into one fastball group per pitcher-year and anchors on its
+    mean. Only when a pitcher-year has no fastball at all does it fall back to the hardest
+    other group by MEAN velocity, and that group must clear ANCHOR_MIN_N pitches first.
+
+    TWO JUDGEMENT CALLS worth knowing about, both flagged to Jack 2026-08-17:
+      - The anchor is per pitcher-YEAR, not per pitcher. The pipeline pooled both seasons,
+        which mixes arsenals across a year in which a pitcher may have added or dropped a
+        pitch. Within-season is the right reference for a within-season grade, and it also
+        keeps the score frame and the criterion frame from sharing an anchor.
+      - Sinkers and two-seams are NOT pooled into the fastball anchor, so "differential vs
+        fastball" keeps meaning "vs the four-seam family". A sinker-primary pitcher with no
+        four-seam still gets a sinker anchor through the fallback. Dan's "a sinker is a
+        fastball" argues the other way and would change what the feature means for every
+        off-speed pitch, so it is deliberately not done here.
+    """
+    src = list(DIFF_COLS)
+    d = df[["PitcherId", "year", "TaggedPitchType"] + src].copy()
+    # one pooled fastball group per pitcher-year; every other tag stays its own group
+    d["_grp"] = np.where(d["TaggedPitchType"].isin(FF_TYPES), "_FF", d["TaggedPitchType"])
+    g = d.groupby(["PitcherId", "year", "_grp"], dropna=False).agg(
+        _ivb=("InducedVertBreak", "mean"), _hb=("HorzBreak", "mean"),
+        _velo=("RelSpeed", "mean"), _n=("RelSpeed", "count")).reset_index()
+    g = g[g["_n"] > 0]
+    # priority: a real fastball group always wins; otherwise the hardest group that clears
+    # ANCHOR_MIN_N; otherwise the hardest group at all. Sorting ascending and taking the last
+    # row per pitcher-year applies that order, with mean velocity as the within-tier rank.
+    g["_pri"] = np.where(g["_grp"] == "_FF", 2, np.where(g["_n"] >= ANCHOR_MIN_N, 1, 0))
+    anchor = (g.sort_values(["_pri", "_velo"]).groupby(["PitcherId", "year"]).tail(1)
+              .rename(columns={"_grp": "anchor_type", "_n": "anchor_n"}))
+    before = {c: df[c].copy() for c in DIFF_COLS.values() if c in df.columns}
+    df = df.merge(anchor[["PitcherId", "year", "anchor_type", "anchor_n",
+                          "_ivb", "_hb", "_velo"]], on=["PitcherId", "year"], how="left")
+    for s, out, ref in (("InducedVertBreak", "vertbreakdiff", "_ivb"),
+                        ("HorzBreak", "horzbreakdiff", "_hb"),
+                        ("RelSpeed", "velocity_differential", "_velo")):
+        df[out] = df[s] - df[ref]
+    df = df.drop(columns=["_ivb", "_hb", "_velo"])
+    moved = [f"{c} mean |change| {float((df[c] - before[c]).abs().mean()):.3f}"
+             for c in before if c in df.columns]
+    print(f"*** DIFFERENTIAL ANCHOR REBUILT: {(df['anchor_type'] == '_FF').mean():.1%} of "
+          f"pitches anchored on a pooled fastball group; {'; '.join(moved)} ***")
     return df
 
 

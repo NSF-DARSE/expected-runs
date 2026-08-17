@@ -279,7 +279,11 @@ def add_fastball_diffs(df):
     g["_pri"] = np.where(g["_grp"] == "_FF", 2, np.where(g["_n"] >= ANCHOR_MIN_N, 1, 0))
     anchor = (g.sort_values(["_pri", "_velo"]).groupby(["PitcherId", "year"]).tail(1)
               .rename(columns={"_grp": "anchor_type", "_n": "anchor_n"}))
-    before = {c: df[c].copy() for c in DIFF_COLS.values() if c in df.columns}
+    # .to_numpy(), NOT a Series copy: the merge below hands back a fresh RangeIndex, while df
+    # arrives here with the holes left by the dropna and level filters in load_pitches.
+    # Subtracting the two Series then aligns on index, pairs up unrelated rows, and reports a
+    # mean |change| of ~9.7 inches for what is really ~0.42. Positional comparison only.
+    before = {c: df[c].to_numpy(copy=True) for c in DIFF_COLS.values() if c in df.columns}
     df = df.merge(anchor[["PitcherId", "year", "anchor_type", "anchor_n",
                           "_ivb", "_hb", "_velo"]], on=["PitcherId", "year"], how="left")
     for s, out, ref in (("InducedVertBreak", "vertbreakdiff", "_ivb"),
@@ -287,7 +291,7 @@ def add_fastball_diffs(df):
                         ("RelSpeed", "velocity_differential", "_velo")):
         df[out] = df[s] - df[ref]
     df = df.drop(columns=["_ivb", "_hb", "_velo"])
-    moved = [f"{c} mean |change| {float((df[c] - before[c]).abs().mean()):.3f}"
+    moved = [f"{c} mean |change| {float(np.abs(df[c].to_numpy() - before[c]).mean()):.3f}"
              for c in before if c in df.columns]
     print(f"*** DIFFERENTIAL ANCHOR REBUILT: {(df['anchor_type'] == '_FF').mean():.1%} of "
           f"pitches anchored on a pooled fastball group; {'; '.join(moved)} ***")

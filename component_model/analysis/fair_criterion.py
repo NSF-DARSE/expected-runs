@@ -129,6 +129,73 @@ ANCHOR_MIN_N = 5
 # parquet written before this function existed carries the OLD differentials under the same
 # three names, and the column-presence check alone would happily serve them.
 ANCHOR_COLS = ["anchor_type", "anchor_n"]
+
+# ---------------- per-pitch-type models ----------------
+# One model per pitch type, because the same measurement means different things on different
+# pitches. Added 2026-08-17 after the coaching staff walked the four-seam page; every entry
+# below traces to a decision recorded there, not to a search over feature sets.
+#
+# GROUPS pool the TrackMan tags that are one pitch for modelling purposes. Display naming is
+# NOT changed by this: the dashboard still shows a pitcher the tag he was thrown.
+PITCH_GROUPS = {
+    "FF": set(FF_TYPES),
+    # A sinker and a two-seam are the same pitch under two names.
+    "SI": {"Sinker", "TwoSeamFastBall"},
+    "SL": {"Slider"},
+    "SW": {"Sweeper"},
+    "CB": {"Curveball"},
+    "FC": {"Cutter"},
+    # Splitter is pooled with ChangeUp for TRAINING ONLY. Measured 2026-08-17 on D1: for the
+    # 174 pitcher-seasons carrying both tags at 15+ each, the two are the same pitch for that
+    # pitcher (velo apart 0.22 mph, IVB 0.83 in, HorzBreak 0.23 in -- 0.07, 0.18 and 0.02 of
+    # the between-pitcher SD; mean Target +0.0032 vs +0.0033; which tag is slower flips 58/42).
+    # Splitter alone has ZERO pitchers at 100+ in both seasons, so the alternative to pooling
+    # is not a splitter model, it is no splitter grade at all. Dan has not yet ruled on the
+    # taxonomy; if he separates them, delete "Splitter" here and splitters go ungraded until
+    # the sample exists.
+    "CH": {"ChangeUp", "Splitter"},
+}
+
+# The physical inputs every pitch type gets. This IS the shipped four-seam list (see the FEATS
+# note above); FEATS stays bound to it so existing callers keep working unchanged.
+BASE_FEATS = list(FEATS)
+# "versus his own primary fastball" -- only meaningful for a pitch trying to look like the
+# fastball and behave differently. Anchored by add_fastball_diffs.
+DIFF_FEATS = ["vertbreakdiff", "horzbreakdiff", "velocity_differential"]
+
+FEATS_BY_PITCH = {
+    # No differentials: a four-seam IS the anchor, so its own differentials are ~0 by
+    # construction, and they were dropped for interpretability in 114cae5.
+    "FF": BASE_FEATS,
+    # No differentials either, per Jack 2026-08-17: a sinker is a fastball, you want both
+    # hard, and "slower than your fastball" is not a virtue you would coach into one. It
+    # still gets its OWN model, because release height is expected to invert against the
+    # four-seam -- a low slot means flat-to-the-top on a four-seam and steep-to-the-bottom
+    # on a sinker, both good, for opposite reasons.
+    "SI": BASE_FEATS,
+    "SL": BASE_FEATS + DIFF_FEATS,
+    "SW": BASE_FEATS + DIFF_FEATS,
+    "CB": BASE_FEATS + DIFF_FEATS,
+    "FC": BASE_FEATS + DIFF_FEATS,
+    # SpinRate removed on Dan's reading, 2026-08-17: the term carries the wrong sign, and it
+    # rewards high spin because spin correlates with break while the speed differential
+    # already carries the mechanism. He wants LOW spin on a cambio. Keeping a feature that is
+    # confidently backwards is worse than dropping a feature that is merely weak.
+    "CH": [f for f in BASE_FEATS if f != "SpinRate"] + DIFF_FEATS,
+}
+
+
+def pitch_mask(df, group):
+    """Rows of one PITCH_GROUPS key. Raises on an unknown key rather than silently empty."""
+    if group not in PITCH_GROUPS:
+        raise KeyError(f"unknown pitch group {group!r}; have {sorted(PITCH_GROUPS)}")
+    return df["TaggedPitchType"].isin(PITCH_GROUPS[group])
+
+
+def feats_for(group):
+    if group not in FEATS_BY_PITCH:
+        raise KeyError(f"no feature set for {group!r}; have {sorted(FEATS_BY_PITCH)}")
+    return list(FEATS_BY_PITCH[group])
 USECOLS = ["PitchUID", "Date", "Pitcher", "PitcherId", "PitcherThrows", "PitcherTeam",
            "Batter", "BatterSide", "BatterTeam", "Balls", "Strikes",
            "TaggedPitchType", "PitchCall", "TaggedHitType", "ExitSpeed", "Angle",
@@ -356,10 +423,17 @@ def add_adjusted(df, K=BATTER_K):
 
 # ---------------- fixed Stuff+ reference ----------------
 
-def stuff_ridge(df, return_model=False, pitch_mask=None):
+def stuff_ridge(df, return_model=False, pitch_mask=None, feats=None):
     """Rows of one pitch type with complete features; adds ridge_pred
-    (Ridge alpha=10, trained 2024). pitch_mask defaults to four-seams."""
+    (Ridge alpha=10, trained 2024).
+
+    pitch_mask defaults to four-seams and feats to FEATS, so every pre-2026-08-17
+    caller gets exactly the four-seam model it asked for. For any other pitch type
+    pass BOTH, from pitch_mask()/feats_for() -- passing a mask without its feature
+    list would grade, say, changeups on the four-seam feature set.
+    """
     mask = df["is_ff"] if pitch_mask is None else pitch_mask
+    feats = list(FEATS) if feats is None else list(feats)
     ff = df[mask].copy()
     # Arm-side frame for the two handedness-mirrored geometry features (see FEATS note):
     # one estimable slope per feature instead of a pooled average over two opposite
@@ -372,11 +446,11 @@ def stuff_ridge(df, return_model=False, pitch_mask=None):
     # dropna so rows missing a source column are cut once on the final feature list.
     for out, src in DEV_SRC.items():
         ff[out] = (ff[src] - ff["is_lhp"].map(DEV_CENTRES[out])).abs()
-    ff = ff.dropna(subset=FEATS + ["Target"])
+    ff = ff.dropna(subset=feats + ["Target"])
     train = ff[ff["year"] == 2024]
     model = make_pipeline(StandardScaler(), Ridge(alpha=RIDGE_ALPHA))
-    model.fit(train[FEATS].values, train["Target"].values)
-    ff["ridge_pred"] = model.predict(ff[FEATS].values)
+    model.fit(train[feats].values, train["Target"].values)
+    ff["ridge_pred"] = model.predict(ff[feats].values)
     return (ff, model) if return_model else ff
 
 

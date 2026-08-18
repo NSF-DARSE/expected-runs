@@ -50,6 +50,92 @@ def test_display_scale_uses_only_rows_above_the_floor():
     assert sd == pytest.approx(np.std([0.0, 0.01, -0.01], ddof=1))
 
 
+def test_result_label_maps_called_and_swinging_strikes():
+    assert ar.result_label("StrikeCalled") == "Called strike"
+    assert ar.result_label("StrikeSwinging") == "Swinging strike"
+
+
+def test_result_label_maps_a_ball():
+    assert ar.result_label("BallCalled") == "Ball"
+
+
+def test_result_label_maps_a_foul_ball():
+    assert ar.result_label("FoulBall") == "Foul ball"
+
+
+def test_result_label_maps_in_play_result_to_a_single():
+    assert ar.result_label("InPlay", "Single") == "Single"
+
+
+def test_result_label_maps_in_play_result_to_an_out():
+    assert ar.result_label("InPlay", "Out") == "Out"
+
+
+def test_result_label_maps_other_in_play_results():
+    assert ar.result_label("InPlay", "HomeRun") == "Home run"
+    assert ar.result_label("InPlay", "Error") == "Reached on error"
+
+
+def test_result_label_is_none_for_bullpen_shaped_undefined_pitch_call():
+    """Bullpen/practice data tags PitchCall Undefined throughout; there is no
+    real call to report, so this must be absent (None), not a placeholder.
+    """
+    assert ar.result_label("Undefined") is None
+    assert ar.result_label("Undefined", "Single") is None
+
+
+def test_result_label_is_none_for_a_missing_pitch_call():
+    assert ar.result_label(None) is None
+    assert ar.result_label(float("nan")) is None
+
+
+def test_result_label_is_none_for_in_play_with_no_play_result():
+    """An extract that predates the PlayResult column, or a genuinely blank
+    cell: there is no result to report, so this omits rather than guesses.
+    """
+    assert ar.result_label("InPlay", None) is None
+    assert ar.result_label("InPlay", "") is None
+    assert ar.result_label("InPlay", "Undefined") is None
+
+
+def test_result_label_surfaces_an_unmapped_pitch_call_visibly_not_wrong():
+    """An unrecognized PitchCall must never silently become one of the known
+    labels (that would be a coach-facing lie) and must never disappear (that
+    would look identical to the bullpen absence case). It has to be both
+    visible and honestly different from every mapped label.
+    """
+    label = ar.result_label("SomeNewTrackManValue")
+    assert label is not None
+    assert label not in ar.PITCH_CALL_LABELS.values()
+    assert "SomeNewTrackManValue" in label
+
+
+def test_result_label_surfaces_an_unmapped_play_result_visibly_not_wrong():
+    label = ar.result_label("InPlay", "Sacrifice2026")
+    assert label is not None
+    assert label not in ar.PLAY_RESULT_LABELS.values()
+    assert "Sacrifice2026" in label
+
+
+def test_batter_label_passes_through_a_real_name():
+    assert ar.batter_label("Smith, John") == "Smith, John"
+
+
+def test_batter_label_strips_surrounding_whitespace():
+    assert ar.batter_label("  Smith, John  ") == "Smith, John"
+
+
+def test_batter_label_is_none_for_blank_missing_or_non_string_values():
+    """Bullpen/practice rows have no real opposing batter. None must cover a
+    blank string, whitespace-only, a missing (None) value, and a NaN float --
+    all real absence, never a placeholder.
+    """
+    assert ar.batter_label("") is None
+    assert ar.batter_label("   ") is None
+    assert ar.batter_label(None) is None
+    assert ar.batter_label(float("nan")) is None
+
+
 def _toy_model(n_feats=4, seed=3):
     """A standardizer + linear model whose parameters we control exactly."""
     rng = np.random.default_rng(seed)

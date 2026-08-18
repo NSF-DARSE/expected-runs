@@ -399,3 +399,47 @@ def test_byCount_leagueShare_outside_0_1_is_rejected():
     bad["pitchers/1000123.json"]["arsenal"][0]["locWhere"][0]["byCount"][0]["leagueShare"] = 1.4
     with pytest.raises(ValueError, match="leagueShare outside 0-1"):
         validate_pitcher_bundle(bad)
+
+
+def test_pitch_row_result_and_batter_are_optional_and_pass_when_present():
+    """A coach placing a pitch from memory needs `r` (result label) and `b`
+    (batter name) on the per-pitch record; both are optional and a bundle
+    carrying real values for them must still validate.
+    """
+    good = copy.deepcopy(GOOD)
+    good["pitchers/1000123.json"]["pitches"][0]["r"] = "Called strike"
+    good["pitchers/1000123.json"]["pitches"][0]["b"] = "Smith, John"
+    validate_pitcher_bundle(good)  # must not raise
+
+
+def test_pitch_row_without_result_or_batter_still_validates():
+    """Bullpen/practice-shaped rows carry neither field at all; GOOD already
+    omits both, so this pins that omission is accepted, not merely untested.
+    """
+    assert "r" not in GOOD["pitchers/1000123.json"]["pitches"][0]
+    assert "b" not in GOOD["pitchers/1000123.json"]["pitches"][0]
+    validate_pitcher_bundle(copy.deepcopy(GOOD))
+
+
+def test_pitch_row_with_empty_result_is_rejected():
+    """A present-but-blank `r` means the upstream omit-when-absent logic failed
+    and shipped a placeholder a coach could mistake for a real call.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["pitches"][0]["r"] = "   "
+    with pytest.raises(ValueError, match="'r'"):
+        validate_pitcher_bundle(bad)
+
+
+def test_pitch_row_with_empty_batter_is_rejected():
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["pitches"][0]["b"] = ""
+    with pytest.raises(ValueError, match="'b'"):
+        validate_pitcher_bundle(bad)
+
+
+def test_pitch_row_with_non_string_result_is_rejected():
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["pitches"][0]["r"] = 7
+    with pytest.raises(ValueError, match="'r'"):
+        validate_pitcher_bundle(bad)

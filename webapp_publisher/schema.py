@@ -110,6 +110,15 @@ REQUIRED_BY_COUNT_KEYS = {"count", "n", "share"}
 # a share like any other.
 REQUIRED_PITCH_KEYS = {"d", "t", "x", "z", "c", "g", "f"}
 
+# `r` (result label, e.g. "Called strike"/"Single") and `b` (batter name) are
+# OPTIONAL per-pitch fields, added 2026-08-17 so a coach can place a pitch from
+# memory. Bullpen/practice rows have neither (see arsenal.result_label /
+# batter_label), so absence itself is not checked here -- only that a key
+# which IS present is never blank. A present-but-empty value would mean the
+# upstream omit-when-absent logic failed silently and shipped a placeholder a
+# coach could mistake for a real call or a real name.
+OPTIONAL_PITCH_STRING_KEYS = ("r", "b")
+
 # Plausible-range guard for scores on the 100+/-15 display scale. A raw
 # expected-run value (~0.00x, lower = better) or an un-negated score shipped
 # once as `loc`, unscaled and with reversed polarity, and bare numeric-ness
@@ -372,5 +381,14 @@ def validate_pitcher_bundle(files: dict) -> None:
             if len(p["f"]) != n_feats:
                 raise ValueError(f"{key} pitch feature array is {len(p['f'])}, expected {n_feats}")
             _check_display_band(p["g"], PITCH_GRADE_BAND, key=key, field="pitch grade (g)", ptype=p["t"])
+            for str_key in OPTIONAL_PITCH_STRING_KEYS:
+                if str_key not in p:
+                    continue
+                val = p[str_key]
+                if not isinstance(val, str) or not val.strip():
+                    raise ValueError(
+                        f"{key} pitch row has a present but blank/non-string "
+                        f"{str_key!r} field: {val!r}"
+                    )
         _check_scaled_spread([p["g"] for p in body["pitches"] if p.get("g") is not None],
                              key=key, field="pitch grade (g)")

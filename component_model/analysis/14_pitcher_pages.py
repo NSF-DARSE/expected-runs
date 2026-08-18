@@ -141,14 +141,30 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
                           if tname == "FF" else [None] * len(sub))
             dates = pd.to_datetime(sub["Date"]).dt.strftime("%Y-%m-%d").values
             for (_, p), g, lg, d in zip(sub.iterrows(), grades, loc_grades, dates):
-                pitch_rows.append({
+                row = {
                     "d": str(d), "t": tname,
                     "x": round(float(p["PlateLocSide"]), 3),
                     "z": round(float(p["PlateLocHeight"]), 3),
                     "c": str(p["count12"]), "g": float(g),
                     "l": None if lg is None else float(lg),
                     "f": [float(p[f]) for f in feats],
-                })
+                }
+                # Coach-legible outcome ("Called strike", "Single", ...) and the
+                # opposing batter's name -- backlog item 5, 2026-08-17 staff
+                # meeting: a coach placing a pitch from memory ("I gave up a
+                # single on that one"). Both optional and absent-tolerant:
+                # bullpen/practice rows have PitchCall Undefined throughout and
+                # no real batter, and must ship with neither key rather than a
+                # placeholder. p.get(...) returns None for a column this
+                # extract never loaded (e.g. no PlayResult) the same way it
+                # does for a genuinely missing cell.
+                res = ar.result_label(p.get("PitchCall"), p.get("PlayResult"))
+                if res is not None:
+                    row["r"] = res
+                batter = ar.batter_label(p.get("Batter"))
+                if batter is not None:
+                    row["b"] = batter
+                pitch_rows.append(row)
         arsenal_rows.sort(key=lambda r: -r["usage"])
         records.append({"pitcherId": int(pid), "name": name, "hand": hand,
                         "arsenal": arsenal_rows, "outings": outings, "pitches": pitch_rows})

@@ -130,7 +130,14 @@ USECOLS = ["PitchUID", "Date", "Pitcher", "PitcherId", "PitcherThrows", "Pitcher
 # requiring it here would make a source CSV every other script reads fine fail
 # to open at all. RelSpeed is a MODEL feature now, not the display-only column
 # it was when this list was written.
-OPTIONAL_COLS = ["RelSpeed"]
+#
+# PlayResult ADDED 2026-08-17 for the pitcher-page per-pitch result label
+# (14_pitcher_pages.py / arsenal.result_label): it is what turns an "InPlay"
+# PitchCall into "Single"/"Out"/etc. Optional for the same reason RelSpeed is --
+# a trimmed extract that lacks it must still load, just with every ball in
+# play falling through result_label's honest "no usable result" path (None)
+# instead of failing the whole read.
+OPTIONAL_COLS = ["RelSpeed", "PlayResult"]
 
 RIDGE_ALPHA = 10
 

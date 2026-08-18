@@ -94,6 +94,95 @@ def pitch_display_scale(values) -> tuple[float, float]:
     return float(vals.mean()), float(vals.std(ddof=1))
 
 
+# ---------------- pitch result label: what a coach would say happened -------
+
+# TrackMan splits "what happened on this pitch" across two columns. PitchCall
+# covers every pitch; PlayResult only exists (and only means anything) when
+# PitchCall == "InPlay". Keys here are the raw TrackMan strings this pipeline
+# has actually seen. A value present but NOT in either table below is a real
+# data surprise, not a bullpen row and not a missing column -- see
+# result_label's "Unmapped:" fallback for why it must stay visible rather than
+# collapse into one of these labels or a blank string.
+PITCH_CALL_LABELS = {
+    "BallCalled": "Ball",
+    "StrikeCalled": "Called strike",
+    "StrikeSwinging": "Swinging strike",
+    "FoulBall": "Foul ball",
+    "FoulBallNotFieldable": "Foul ball",
+    "FoulBallFieldable": "Foul ball",
+    "HitByPitch": "Hit by pitch",
+    "CatchersInterference": "Catcher's interference",
+    "BallinDirt": "Ball",
+    "AutomaticBall": "Ball",
+    "AutomaticStrike": "Called strike",
+    "BallIntentional": "Ball",
+}
+
+PLAY_RESULT_LABELS = {
+    "Single": "Single",
+    "Double": "Double",
+    "Triple": "Triple",
+    "HomeRun": "Home run",
+    "Out": "Out",
+    "FieldersChoice": "Fielder's choice",
+    "Error": "Reached on error",
+    "Sacrifice": "Sacrifice",
+}
+
+# PitchCall/PlayResult values that mean "no real call was logged," not "a call
+# we haven't mapped yet." Bullpen/practice data tags EVERY row's PitchCall
+# Undefined regardless of what actually happened (see 14_pitcher_pages.py's
+# module docstring), and this is also what a blank InPlay PlayResult means.
+# Both must OMIT the result field entirely -- see result_label -- rather than
+# ship a placeholder a coach could mistake for a real call.
+NO_CALL_VALUES = {"undefined"}
+
+
+def result_label(pitch_call, play_result=None) -> str | None:
+    """One coach-legible outcome string for a pitch ("Called strike", "Single",
+    ...), or None when there is nothing honest to say.
+
+    None covers real absence, never a guess: PitchCall missing/NaN/blank (a
+    trimmed extract, or a genuinely empty cell), and PitchCall == "Undefined"
+    (how bullpen/practice rows are tagged throughout). An "InPlay" pitch with a
+    missing/blank/Undefined PlayResult -- e.g. an extract that predates the
+    PlayResult column -- falls through to None the same way, since there is no
+    result to report.
+
+    Every other PitchCall maps directly EXCEPT "InPlay", which carries no
+    outcome of its own; the real result lives in PlayResult, so InPlay pitches
+    are relabeled from that column instead.
+
+    A value present but not found in either lookup table is a genuine data
+    surprise (a PitchCall or PlayResult this mapping has never seen) and must
+    not fall through to a wrong-but-plausible label or a silent empty string:
+    it surfaces as "Unmapped: <value>" so the gap stays visible.
+    """
+    call = pitch_call.strip() if isinstance(pitch_call, str) else None
+    if not call or call.lower() in NO_CALL_VALUES:
+        return None
+    if call == "InPlay":
+        pr = play_result.strip() if isinstance(play_result, str) else None
+        if not pr or pr.lower() in NO_CALL_VALUES:
+            return None
+        return PLAY_RESULT_LABELS.get(pr, f"Unmapped: {pr}")
+    return PITCH_CALL_LABELS.get(call, f"Unmapped: {call}")
+
+
+def batter_label(value) -> str | None:
+    """The batter's name for a per-pitch record, or None when there isn't one.
+
+    Bullpen/practice data logs every pitch under one pitcher id with no real
+    opposing batter, so a blank, whitespace-only, missing, or non-string value
+    must OMIT the field entirely rather than ship an empty string or a source
+    placeholder a coach could mistake for a name.
+    """
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
+
+
 def contributions(feature_values, scaler_mean, scaler_scale, coef, baseline_z, sd):
     """Per-feature contribution to Stuff+, in display points.
 

@@ -439,6 +439,61 @@ def test_secondary_pitch_rows_carry_no_location_grade():
         assert all(p["l"] is None for p in r["pitches"])
 
 
+def test_pitch_rows_carry_result_and_batter_when_the_source_has_them():
+    """Backlog item 5, 2026-08-17 staff meeting: a coach placing a pitch from
+    memory needs the result and the batter name on the per-pitch record.
+    """
+    mod = _load_pages_module()
+    feats, fitted = _fitted()
+    n = len(fitted["pitches"])
+    fitted["pitches"]["PitchCall"] = (["StrikeCalled", "InPlay", "BallCalled"] * n)[:n]
+    fitted["pitches"]["PlayResult"] = (["Undefined", "Single", "Undefined"] * n)[:n]
+    fitted["pitches"]["Batter"] = [f"Batter, {i}" for i in range(n)]
+    records = mod.build_pitcher_records({"FF": fitted}, feats, floor_n=1, asof="2026-03-10",
+                                        min_type_pitches=1)
+    rows = [p for r in records for p in r["pitches"]]
+    labels = {p["r"] for p in rows}
+    assert labels == {"Called strike", "Single", "Ball"}
+    for i, p in enumerate(rows):
+        assert p["b"] == f"Batter, {i}"
+
+
+def test_bullpen_shaped_pitch_rows_omit_result_and_batter():
+    """Bullpen/practice data: PitchCall is Undefined throughout and there is no
+    real opposing batter. Both fields must be OMITTED, never a placeholder or
+    an empty string.
+    """
+    mod = _load_pages_module()
+    feats, fitted = _fitted()
+    n = len(fitted["pitches"])
+    fitted["pitches"]["PitchCall"] = "Undefined"
+    fitted["pitches"]["PlayResult"] = "Undefined"
+    fitted["pitches"]["Batter"] = [None] * n
+    records = mod.build_pitcher_records({"FF": fitted}, feats, floor_n=1, asof="2026-03-10",
+                                        min_type_pitches=1)
+    rows = [p for r in records for p in r["pitches"]]
+    assert rows, "fixture must still produce pitch rows"
+    for p in rows:
+        assert "r" not in p
+        assert "b" not in p
+
+
+def test_pitch_rows_without_a_pitch_call_or_batter_column_omit_both_fields():
+    """An extract that never carried PitchCall/PlayResult/Batter at all (should
+    not happen in production -- PitchCall and Batter are required columns --
+    but the assembly must degrade to omission rather than raise).
+    """
+    mod = _load_pages_module()
+    feats, fitted = _fitted()
+    records = mod.build_pitcher_records({"FF": fitted}, feats, floor_n=1, asof="2026-03-10",
+                                        min_type_pitches=1)
+    rows = [p for r in records for p in r["pitches"]]
+    assert rows
+    for p in rows:
+        assert "r" not in p
+        assert "b" not in p
+
+
 def test_region_rows_carry_no_count_field_and_no_points_in_byCount():
     """The collapsed row contract, checked directly rather than only implied by
     other assertions: a region row has no top-level `count` (the frontend's

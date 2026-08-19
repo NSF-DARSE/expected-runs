@@ -239,6 +239,43 @@ def paths():
     return args
 
 
+def workdirs():
+    """(data_csv, score_workdir, crit_workdir) from the environment.
+
+    The multi-frame scripts need TWO workdirs at once -- one holding the build a pitcher is
+    GRADED from and one holding the build he is MEASURED against -- which paths() cannot
+    express, since it resolves a single --workdir. Reading them here keeps local absolute
+    paths out of the scripts and therefore out of this public repository; every caller fails
+    loudly on a missing variable rather than defaulting to someone else's machine.
+    """
+    data = os.environ.get("STUFFPLUS_DATA")
+    score = os.environ.get("STUFFPLUS_WORKDIR")
+    crit = os.environ.get("STUFFPLUS_WORKDIR_CRIT")
+    missing = [n for n, v in (("STUFFPLUS_DATA", data), ("STUFFPLUS_WORKDIR", score),
+                              ("STUFFPLUS_WORKDIR_CRIT", crit)) if not v]
+    if missing:
+        sys.exit("set " + ", ".join(missing) + " (source CSV, score-build workdir, "
+                 "criterion-build workdir; both workdirs must live outside the repo)")
+    return data, score, crit
+
+
+def load_frame(data, workdir, years, level="D1"):
+    """One fully-built frame: pitches + xT + adjT, for the given real year pair.
+
+    The pair is role-relabeled to 2024/2025 inside load_pitches, so callers always filter on
+    those labels regardless of which seasons they asked for.
+    """
+    saved = sys.argv
+    sys.argv = ["x", "--data", data, "--workdir", workdir, "--years", years,
+                "--level", level]
+    args = paths()
+    sys.argv = saved
+    df = load_pitches(args)
+    add_xt(df)
+    add_adjusted(df)
+    return df
+
+
 def _year_suffix(args):
     pair = getattr(args, "year_pair", (2024, 2025))
     tag = "" if pair == (2024, 2025) else f"_{pair[0]}_{pair[1]}"

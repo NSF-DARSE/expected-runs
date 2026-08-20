@@ -27,7 +27,7 @@ value is dominated by rare high-value events and needs hundreds. Location+ sits 
 crossover is measurable, differs by pitch type, and is the honest answer to "can you grade
 this guy in April".
 
-FOUR THINGS A CONSUMER OF THIS FILE MUST HONOUR:
+FIVE THINGS A CONSUMER OF THIS FILE MUST HONOUR:
 
   1. LOCATION+ IS FOUR-SEAM ONLY. The pooled location map is a value-by-zone surface fit on
      four-seams; a slider low-and-away and a fastball low-and-away are not worth the same
@@ -48,14 +48,24 @@ FOUR THINGS A CONSUMER OF THIS FILE MUST HONOUR:
      table on n and multiplies. It must not hardcode weights and must not re-derive them: a
      second implementation drifts from the model silently, which is precisely how the
      differential-anchor bug survived as long as it did.
+  5. COMPOSITE ELIGIBILITY IS A GATE VERDICT, NOT A DISPLAY PREFERENCE. Every pitch type
+     carries "composite_eligible" plus a printable "composite_ineligible_reason", read from
+     coach_incremental_gate.json at build time so re-running the gate is what moves the flag.
+     Weights and params are still emitted for an ineligible type -- they are what lets the UI
+     show the components with the sample each one has -- but no blended number may be shown.
+     It FAILS CLOSED: an unreadable gate file marks every type ineligible, because the wrong
+     default here ships a confident composite for a pitch whose Stuff+ was never shown to add
+     anything (see item 3, and the sinker).
 
 KNOWN LIMITATION, now load-bearing. reliability_curves.optimal_blend takes each off-diagonal
 of Sigma as Cov(a_i, a_j) alone, i.e. it assumes same-season cross-component noise is
 negligible. Its own docstring flags this and says to validate empirically "if the blend weights
-end up load-bearing". They now are. Part D below is that check: it compares the closed-form
-blend R^2 against a direct empirical fit on held-out seasons. A material gap means the
-off-diagonal assumption is doing damage and the weights should fall back to reliability-ranked
-rather than GLS.
+end up load-bearing". They now are, and that check has NOT been run. Until it is, treat
+"blend_r2" as the closed form's own estimate of itself rather than as validated out-of-sample
+performance. The check to run is a direct empirical fit on held-out seasons compared against
+the closed form; a material gap means the off-diagonal assumption is doing damage and the
+weights should fall back to reliability-ranked rather than GLS. The weights themselves do not
+depend on this being clean, but the reported R^2 does.
 
 SIGN CONVENTION: every component is expected run value from the pitcher's perspective, LOWER =
 BETTER, and so is the criterion. Weights are therefore all expected positive, and the display
@@ -89,7 +99,7 @@ COMPONENTS = [("stuff", "ridge_pred", "Stuff+"),
               ("results", "adjT", "Recent results")]
 LOC_TYPES = {"FF"}          # see limitation 1 in the docstring
 N_GRID = [10, 15, 20, 30, 40, 60, 80, 120, 175, 250, 350, 500, 750, 1000, 1500, 2500]
-CONTRACT_VERSION = 1
+CONTRACT_VERSION = 2
 
 
 def cli():
@@ -107,6 +117,10 @@ def cli():
                          "estimate rests on few pitcher-seasons is reported, not hidden.")
     ap.add_argument("--splits", type=int, default=60,
                     help="Random game-split iterations per component per pitch type.")
+    ap.add_argument("--gate", default=None,
+                    help="coach_incremental_gate.json. Defaults to the one in --workdir. "
+                         "Its verdicts decide composite_eligible per pitch type; if the file "
+                         "is absent every type is marked INELIGIBLE (fail closed).")
     ap.add_argument("--seed", type=int, default=20260820)
     args = ap.parse_args()
     if not args.caches or not args.workdir:
@@ -115,7 +129,75 @@ def cli():
                  "one frame; the variance-components math needs 2+ seasons per pitcher.")
     args.caches = [p.strip() for p in args.caches.split(",") if p.strip()]
     os.makedirs(args.workdir, exist_ok=True)
+    if not args.gate:
+        args.gate = os.path.join(args.workdir, "coach_incremental_gate.json")
     return args
+
+
+def load_gate(path):
+    """The incremental-validity gate's verdicts, or None if they cannot be read.
+
+    Composite eligibility is NOT a judgement this script makes. coach_incremental_gate.py
+    already asks the only question that matters -- does Stuff+ add anything over what the
+    pitcher's own prior results already say -- against a pre-registered bar, and re-running
+    that gate must be what moves the flag, not an edit here.
+
+    FAILS CLOSED on purpose. A missing, unparseable, or structurally wrong gate file yields
+    None, and every pitch type is then marked ineligible. The alternative default would ship
+    a blended coach-facing number for a pitch type whose Stuff+ has never been shown to add
+    anything, which is the exact failure the gate exists to prevent.
+    """
+    try:
+        with open(path) as fh:
+            g = json.load(fh)
+        by = g["by_pitch"]
+        if not isinstance(by, dict):
+            raise TypeError("by_pitch is %s, expected object" % type(by).__name__)
+    except Exception as e:
+        print("  gate NOT read (%s: %s) -- every type marked composite-ineligible"
+              % (type(e).__name__, e))
+        return None, {"available": False, "path": path,
+                      "error": "%s: %s" % (type(e).__name__, e)}
+    meta = {"available": True, "path": path,
+            "share": g.get("share"), "n_boot": g.get("n_boot"),
+            "pass_bar": g.get("pass_bar")}
+    print("  gate read: %s" % ", ".join(
+        "%s=%s" % (k, v.get("verdict")) for k, v in by.items()))
+    return by, meta
+
+
+def eligibility(grp, gate, meta):
+    """Per-type composite_eligible plus a reason a coach-facing app can print verbatim."""
+    if gate is None:
+        return {"composite_eligible": False,
+                "composite_ineligible_reason":
+                    "The incremental-validity gate has not been run, so no pitch type is "
+                    "cleared for a blended score yet. Show the components on their own.",
+                "gate": {"verdict": None}}
+    row = gate.get(grp)
+    if not isinstance(row, dict) or "verdict" not in row:
+        return {"composite_eligible": False,
+                "composite_ineligible_reason":
+                    "The incremental-validity gate has no result for this pitch type, so a "
+                    "blended score is withheld. Show the components on their own.",
+                "gate": {"verdict": None}}
+    seen = {"verdict": row.get("verdict"), "n": row.get("n"),
+            "p_gain_positive": row.get("p_gain_positive"),
+            "p_semipartial_positive": row.get("p_semipartial_positive"),
+            "blend_gain": row.get("blend_gain"),
+            "pass_bar": meta.get("pass_bar")}
+    if row.get("verdict") == "PASS":
+        return {"composite_eligible": True, "composite_ineligible_reason": None, "gate": seen}
+    p, bar = row.get("p_gain_positive"), meta.get("pass_bar")
+    detail = ("" if p is None or bar is None
+              else " (%.0f%% confident it helps, against a %.0f%% bar)"
+                   % (100 * p, 100 * bar))
+    return {"composite_eligible": False,
+            "composite_ineligible_reason":
+                "Stuff+ has not been shown to add anything for this pitch type beyond what "
+                "the pitcher's own recent results already say%s. Show Stuff+ and recent "
+                "results side by side instead of blending them." % detail,
+            "gate": seen}
 
 
 def load_seasons(paths):
@@ -342,6 +424,7 @@ def main() -> int:
     t0 = time.time()
     args = cli()
     rng = np.random.default_rng(args.seed)
+    gate, gate_meta = load_gate(args.gate)
     df = load_seasons(args.caches)
     fc.add_xt(df)
     fc.add_adjusted(df)
@@ -358,7 +441,7 @@ def main() -> int:
     out = {"contract_version": CONTRACT_VERSION,
            "generated": {"seasons": SEASONS, "train_year": TRAIN_YEAR,
                          "min_n_per_season": args.min_n, "splits": args.splits,
-                         "min_half": args.min_half},
+                         "min_half": args.min_half, "gate": gate_meta},
            "sign_convention": ("Every component and the criterion are expected run value from "
                                "the pitcher's perspective, LOWER = BETTER. Weights are "
                                "positive. Negate once at the display layer, not here."),
@@ -373,16 +456,25 @@ def main() -> int:
                "Where params[c]['drift_clamped_at_zero'] is true, that component's drift "
                "estimate hit the non-negative boundary: its 'component_r2' is an UPPER "
                "BOUND, not a point estimate, and must not be shown as a precise figure. "
-               "The weights themselves are conservative under the clamp."],
+               "The weights themselves are conservative under the clamp.",
+               "Gate on by_pitch[t]['composite_eligible'] before showing any blended score. "
+               "It is false for a type whose Stuff+ never cleared the incremental-validity "
+               "bar, and false for EVERY type when the gate file could not be read, so an "
+               "absent gate withholds composites rather than allowing them.",
+               "An ineligible type still carries usable weights and params: show its "
+               "components separately, with the sample each one has."],
            "n_grid": N_GRID, "by_pitch": {}}
 
     for grp in ORDER:
         try:
-            out["by_pitch"][grp] = per_type(graded_frame(df, grp, lmap), grp, args, rng)
+            row = per_type(graded_frame(df, grp, lmap), grp, args, rng)
         except Exception as e:  # one thin pitch type must not lose the other five
             print("")
             print("=== %s   FAILED: %s: %s" % (grp, type(e).__name__, e))
-            out["by_pitch"][grp] = {"skipped": "%s: %s" % (type(e).__name__, e)}
+            row = {"skipped": "%s: %s" % (type(e).__name__, e)}
+        # Stamped even on the skipped path: a type with no weights must not read as eligible.
+        row.update(eligibility(grp, gate, gate_meta))
+        out["by_pitch"][grp] = row
 
     dest = os.path.join(args.workdir, "coach_pitching_plus_weights.json")
     with open(dest, "w") as fh:

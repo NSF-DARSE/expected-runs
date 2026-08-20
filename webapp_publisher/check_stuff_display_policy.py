@@ -8,13 +8,20 @@ entry at all). The confirmed set is NOT hardcoded here -- it is read from
 coach_pitching_plus_weights.json's composite_eligible, so re-running the gate moves this
 check's target the same way it moves the app's.
 
-WHAT IT IS FOR, and the honest state of it. The live app enforces this at DISPLAY time
+WHAT IT IS FOR, and why it does not go green. The live app enforces this at DISPLAY time
 (isStuffPlusConfirmed in src/lib/pitchingPlusMix.ts, app repo). The publisher does not: the
-bundle still carries every type's Stuff+, so grades the app has decided not to show are still
-shipped to the browser. This script measures that gap. Until someone gates the publisher too,
-a run against a real bundle is EXPECTED to fail, and that failure is a report, not a
-regression. Do not wire it into a build to make it green, and do not make it pass by removing
-the confirmed types -- that would suppress exactly what Jack decided to keep.
+bundle carries every type's Stuff+, so the withheld grades are still in the JSON the browser
+downloads. Jack was asked on 2026-08-20 whether to gate the publisher too and declined: a coach
+is not going to open devtools to dig out a grade, and these are not confidential numbers. THE
+GAP IS AN ACCEPTED DECISION, NOT A BACKLOG ITEM. Do not build a publisher-side gate off the
+back of this file.
+
+That leaves this check with no green target against a real bundle, by design. Run it to see WHAT
+is exposed and to confirm the set has not drifted past the three known types (Sinker, Cutter,
+Splitter); do not run it as a pass/fail build step, because it will always fail and a check that
+always fails gets switched off or, worse, gets "fixed" by deleting the confirmed types -- which
+would suppress exactly what Jack decided to keep. The display gate in the app is the enforcement
+point. This is instrumentation.
 
 HISTORY WORTH KEEPING, because it is why this file exists at all. An earlier version of this
 check asserted fastball-only, which was the right policy for about four hours on 2026-08-20 and
@@ -260,8 +267,9 @@ def main() -> int:
         return fail("the check itself could not complete (%s: %s)." % (type(e).__name__, e))
     print("")
     if problems:
-        print("  POLICY NOT MET (%d problem%s). Note: the publisher does not gate Stuff+ "
-              "today, so this is expected on a real bundle and is a report of that gap."
+        print("  EXPOSED IN THE BUNDLE (%d finding%s). The publisher deliberately does not "
+              "gate Stuff+ (Jack, 2026-08-20), so this is the accepted state, not a "
+              "regression. Enforcement is the app's display gate."
               % (problems, "" if problems == 1 else "s"))
         return 1
     print("  policy met: Stuff+ ships only for confirmed pitch types.")

@@ -432,3 +432,40 @@ def test_random_game_half_varies_across_calls():
     games_a = split_a[["GameID", "half"]].drop_duplicates().set_index("GameID")["half"]
     games_b = split_b[["GameID", "half"]].drop_duplicates().set_index("GameID")["half"]
     assert not games_a.equals(games_b)
+
+
+def test_optimal_blend_signal_vars_override_defaults_to_internal_estimate():
+    """Omitting signal_vars must reproduce the pre-override behaviour exactly.
+
+    The override exists for the negative-drift boundary case (see optimal_blend's
+    docstring); every existing caller passes nothing and must be unaffected.
+    """
+    tab, truth = simulate_three_metric_panel(seed=21)
+    metric_cols = ["stuff", "loc"]
+    noises = {m: truth["noises"][m] for m in metric_cols}
+    internal = {m: rc.signal_variance(tab, m, noises[m]) for m in metric_cols}
+
+    w_default, r2_default = rc.optimal_blend(tab, metric_cols, "adjT", noises, 200)
+    w_explicit, r2_explicit = rc.optimal_blend(tab, metric_cols, "adjT", noises, 200,
+                                                signal_vars=internal)
+    assert r2_default == pytest.approx(r2_explicit, rel=1e-12)
+    for m in metric_cols:
+        assert w_default[m] == pytest.approx(w_explicit[m], rel=1e-12)
+
+
+def test_optimal_blend_raising_a_signal_var_lowers_that_metrics_weight():
+    """The clamp must be conservative in the direction it is used for.
+
+    Raising a metric's diagonal (which is what clamping negative drift up to
+    s2_stable does) has to REDUCE that metric's weight. If it raised it, the
+    clamp would be making the very inflation it exists to prevent worse.
+    """
+    tab, truth = simulate_three_metric_panel(seed=22)
+    metric_cols = ["stuff", "loc"]
+    noises = {m: truth["noises"][m] for m in metric_cols}
+    base = {m: rc.signal_variance(tab, m, noises[m]) for m in metric_cols}
+    bumped = dict(base, stuff=base["stuff"] * 3.0)
+
+    w_base, _ = rc.optimal_blend(tab, metric_cols, "adjT", noises, 200, signal_vars=base)
+    w_bumped, _ = rc.optimal_blend(tab, metric_cols, "adjT", noises, 200, signal_vars=bumped)
+    assert w_bumped["stuff"] < w_base["stuff"]

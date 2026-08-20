@@ -236,3 +236,13 @@ secrets/
 .DS_Store
 Thumbs.db
 .claude/settings.local.json
+
+# TrackMan licensed API docs -- never commit to the public repo
+trackman_api/swagger.json
+trackman_api/*.pdf
+
+# Licensed TrackMan pitch data (Level II) -- FTP mirrors / API backfills.
+# Year-tree folders and any CSV under trackman_api must never reach the
+# public repo.
+trackman_api/[0-9][0-9][0-9][0-9]/
+trackman_api/**/*.csv

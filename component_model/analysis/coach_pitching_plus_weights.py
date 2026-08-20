@@ -27,7 +27,7 @@ value is dominated by rare high-value events and needs hundreds. Location+ sits 
 crossover is measurable, differs by pitch type, and is the honest answer to "can you grade
 this guy in April".
 
-FIVE THINGS A CONSUMER OF THIS FILE MUST HONOUR:
+SIX THINGS A CONSUMER OF THIS FILE MUST HONOUR:
 
   1. LOCATION+ IS FOUR-SEAM ONLY. The pooled location map is a value-by-zone surface fit on
      four-seams; a slider low-and-away and a fastball low-and-away are not worth the same
@@ -51,11 +51,20 @@ FIVE THINGS A CONSUMER OF THIS FILE MUST HONOUR:
   5. COMPOSITE ELIGIBILITY IS A GATE VERDICT, NOT A DISPLAY PREFERENCE. Every pitch type
      carries "composite_eligible" plus a printable "composite_ineligible_reason", read from
      coach_incremental_gate.json at build time so re-running the gate is what moves the flag.
-     Weights and params are still emitted for an ineligible type -- they are what lets the UI
-     show the components with the sample each one has -- but no blended number may be shown.
-     It FAILS CLOSED: an unreadable gate file marks every type ineligible, because the wrong
-     default here ships a confident composite for a pitch whose Stuff+ was never shown to add
-     anything (see item 3, and the sinker).
+     An ineligible type withholds BOTH its blended score AND its Stuff+ -- see item 6 for why
+     the second half of that is not obvious. Weights and params are still emitted, because the
+     remaining components (Location+ where it exists, recent results) are still shown and still
+     need them. It FAILS CLOSED: an unreadable gate file marks every type ineligible, because
+     the wrong default here ships a confident composite for a pitch whose Stuff+ was never
+     shown to add anything (see item 3, and the sinker).
+  6. AN INELIGIBLE TYPE SHOWS NO STUFF+ AT ALL. Through v2 this contract said to show Stuff+
+     and recent results side by side for an ineligible type, on the reasoning that withholding
+     only the blend keeps the components honest and visible. Jack ruled otherwise on
+     2026-08-20: a Stuff+ we could not show adds anything over a pitcher's own results is not
+     information a coach should be handed next to the results it failed to beat, because it
+     will be read as a second opinion rather than as noise. The app implements the ruling
+     (isStuffPlusConfirmed, src/lib/pitchingPlusMix.ts) and this contract now states it, so a
+     consumer reading only this file does not reintroduce the display that was removed.
 
 KNOWN LIMITATION, now load-bearing. reliability_curves.optimal_blend takes each off-diagonal
 of Sigma as Cov(a_i, a_j) alone, i.e. it assumes same-season cross-component noise is
@@ -99,7 +108,7 @@ COMPONENTS = [("stuff", "ridge_pred", "Stuff+"),
               ("results", "adjT", "Recent results")]
 LOC_TYPES = {"FF"}          # see limitation 1 in the docstring
 N_GRID = [10, 15, 20, 30, 40, 60, 80, 120, 175, 250, 350, 500, 750, 1000, 1500, 2500]
-CONTRACT_VERSION = 2
+CONTRACT_VERSION = 3   # v3: an ineligible type withholds its Stuff+, not just the blend
 
 
 def cli():
@@ -171,15 +180,15 @@ def eligibility(grp, gate, meta):
     if gate is None:
         return {"composite_eligible": False,
                 "composite_ineligible_reason":
-                    "The incremental-validity gate has not been run, so no pitch type is "
-                    "cleared for a blended score yet. Show the components on their own.",
+                    "The incremental-validity gate has not been run, so no pitch type has a "
+                    "Stuff+ cleared for display yet.",
                 "gate": {"verdict": None}}
     row = gate.get(grp)
     if not isinstance(row, dict) or "verdict" not in row:
         return {"composite_eligible": False,
                 "composite_ineligible_reason":
-                    "The incremental-validity gate has no result for this pitch type, so a "
-                    "blended score is withheld. Show the components on their own.",
+                    "This pitch type has never been tested against the incremental-validity "
+                    "gate, so its Stuff+ is withheld.",
                 "gate": {"verdict": None}}
     seen = {"verdict": row.get("verdict"), "n": row.get("n"),
             "p_gain_positive": row.get("p_gain_positive"),
@@ -195,8 +204,8 @@ def eligibility(grp, gate, meta):
     return {"composite_eligible": False,
             "composite_ineligible_reason":
                 "Stuff+ has not been shown to add anything for this pitch type beyond what "
-                "the pitcher's own recent results already say%s. Show Stuff+ and recent "
-                "results side by side instead of blending them." % detail,
+                "the pitcher's own recent results already say%s, so it is withheld rather "
+                "than shown alongside them." % detail,
             "gate": seen}
 
 
@@ -461,8 +470,15 @@ def main() -> int:
                "It is false for a type whose Stuff+ never cleared the incremental-validity "
                "bar, and false for EVERY type when the gate file could not be read, so an "
                "absent gate withholds composites rather than allowing them.",
-               "An ineligible type still carries usable weights and params: show its "
-               "components separately, with the sample each one has."],
+               "An ineligible type shows NO Stuff+ -- not the blend and not the component "
+               "on its own. Show its other components (Location+ where present, recent "
+               "results) with the sample each one has. Withholding only the blend and "
+               "leaving Stuff+ beside the results was the v2 guidance and was reversed: a "
+               "grade that did not beat the pitcher's own results reads to a coach as a "
+               "second opinion rather than as noise.",
+               "A withheld Stuff+ must render as absent, never as a number. Rounding a null "
+               "to 0 ships '0' as a confident grade, which is worse than the grade this rule "
+               "was written to withhold."],
            "n_grid": N_GRID, "by_pitch": {}}
 
     for grp in ORDER:

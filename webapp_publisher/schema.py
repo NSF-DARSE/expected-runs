@@ -20,7 +20,8 @@ def validate_bundle(bundle: dict) -> None:
 
 
 REQUIRED_ARSENAL_KEYS = {"type", "label", "n", "usage", "stuff", "loc",
-                         "recentChange", "aboveFloor", "typical", "percentiles"}
+                         "recentChange", "trend", "aboveFloor", "typical",
+                         "percentiles"}
 REQUIRED_PITCH_KEYS = {"d", "t", "x", "z", "c", "g", "f"}
 
 # Plausible-range guard for scores on the 100+/-15 display scale. A raw

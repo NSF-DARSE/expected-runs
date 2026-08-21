@@ -30,6 +30,69 @@ SAMPLE_FLOOR = 100
 MIN_TYPE_PITCHES = 25   # skip a pitch type for a pitcher below this
 SEASON_ROLE_YEAR = 2025  # fair_criterion relabels the year pair to 2024/2025 roles
 
+# Floor per 30-day window for RAW physical trend metrics (velo, break). Raw
+# measurements are far less noisy than run value, and the 2-SE display gate does
+# the real work of separating signal from noise; this floor only rules out
+# windows too small for the SE itself to mean anything. The Stuff+ trend keeps
+# SAMPLE_FLOOR, script 06's measured detectability floor.
+TREND_METRIC_FLOOR = 15
+
+# Which trend metrics carry a VALIDATED direction-of-good, per pitch type.
+# "up" = a rise is improvement. Absent = the display may say "changed", never
+# "improving": an arrow is the univariate claim "more of this raw thing is
+# better", and it ships only where that claim has been tested against the
+# next-season run-value criterion and its CI excludes zero.
+#
+# Measured 2026-08-21 (pitcher-level metric mean vs next-season adjT, 2025->2026
+# gate panel, 2000-rep pitcher bootstrap; criterion is run value, lower=better,
+# so a NEGATIVE r validates "up"):
+#   FF     velo r=-0.127 [-0.177,-0.079]  -> up
+#   Sinker velo r=-0.138 [-0.256,-0.015]  -> up
+#   Cutter velo r=-0.037 [-0.179,+0.102]  -> not validated
+#   break direction: unconfirmed univariately for every type tested (SI -0.078
+#   [-0.194,+0.045]); its Stuff+ signal is conditional on other features, which
+#   does not license a raw-metric arrow.
+# The Stuff+ trend's own direction is "up" by display-scale construction, but
+# the frontend renders that row only for gate-confirmed types
+# (isStuffPlusConfirmed, fail-closed), so it is not repeated here.
+VALIDATED_TREND_DIRECTIONS = {
+    ("FF", "velo"): "up",
+    ("Sinker", "velo"): "up",
+}
+
+
+def build_trend(sub: pd.DataFrame, grades: np.ndarray, tname: str, asof: str,
+                floor_n: int) -> dict:
+    """Per-metric 30-day trend block for one pitcher's pitch type.
+
+    Every entry is arsenal.windowed_delta's dict plus "direction"
+    ("up" | None), or None when a window is under its floor.
+    """
+    hb_arm = sub["HorzBreak"] * (1 - 2 * sub["is_lhp"])
+    mov_angle = np.degrees(np.arctan2(hb_arm, sub["InducedVertBreak"]))
+    mov_mag = np.hypot(hb_arm, sub["InducedVertBreak"])
+    # RelSpeed is an optional source column (fair_criterion.OPTIONAL_COLS); the
+    # current webapp extract carries only EffectiveVelo. The fallback keeps the
+    # same validated direction: EffectiveVelo vs next-season adjT measured
+    # 2026-08-21 at r=-0.130 [-0.178,-0.085] (FF) and -0.134 [-0.256,-0.009]
+    # (Sinker), same panel and bootstrap as the RelSpeed figures above.
+    velo = sub["RelSpeed"] if "RelSpeed" in sub.columns else sub["EffectiveVelo"]
+    metrics = {
+        "stuff": (pd.Series(grades, index=sub.index), floor_n),
+        "velo": (velo, TREND_METRIC_FLOOR),
+        "movAngle": (pd.Series(mov_angle, index=sub.index), TREND_METRIC_FLOOR),
+        "movMag": (pd.Series(mov_mag, index=sub.index), TREND_METRIC_FLOOR),
+    }
+    out = {}
+    for key, (vals, floor) in metrics.items():
+        stats = ar.windowed_delta(vals, sub["Date"], asof, floor)
+        if stats is None:
+            out[key] = None
+            continue
+        direction = "up" if key == "stuff" else VALIDATED_TREND_DIRECTIONS.get((tname, key))
+        out[key] = {**stats, "direction": direction}
+    return out
+
 
 def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, asof: str,
                           min_type_pitches: int = MIN_TYPE_PITCHES) -> list[dict]:
@@ -64,6 +127,7 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
             mu, sd = state["mu"], state["sd"]
             per_outing = ar.outing_table(sub, mu, sd)
             change = ar.recent_change(per_outing, floor_n=floor_n, asof=asof)
+            grades = ar.to_display(sub["ridge_pred"].values, mu, sd)
 
             arsenal_rows.append({
                 "type": tname,
@@ -78,6 +142,7 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
                 "loc": (float(ar.to_display(sub["loc"].mean(), state["loc_mu"], state["loc_sd"]))
                         if tname == "FF" else None),
                 "recentChange": change,
+                "trend": build_trend(sub, grades, tname, asof, floor_n),
                 "aboveFloor": bool(len(sub) >= floor_n),
                 "typical": [float(v) for v in sub[feats].mean().values],
                 # Percentile of each of his typical trait values against the
@@ -92,7 +157,6 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
             for _, o in per_outing.iterrows():
                 outings.append({"date": str(o["date"]), "type": tname,
                                 "n": int(o["n"]), "stuff": float(o["stuff"])})
-            grades = ar.to_display(sub["ridge_pred"].values, mu, sd)
             dates = pd.to_datetime(sub["Date"]).dt.strftime("%Y-%m-%d").values
             for (_, p), g, d in zip(sub.iterrows(), grades, dates):
                 pitch_rows.append({

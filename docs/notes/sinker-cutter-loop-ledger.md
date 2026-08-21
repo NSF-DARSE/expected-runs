@@ -60,6 +60,26 @@ the gain CI enough that a true stuff_r ≈ 0.15–0.18 might clear honestly.
 FC remains parked per task zero: criterion reliability indistinguishable from 0 at this
 sample; no feature work is validatable against it.
 
+## Post-loop: development-panel tests — 2026-08-21
+
+Jack's question: can we tell a pitcher his sinker is improving without a validated outcome
+link? Two tests in `coach_si_change_tests.py` (both within the frozen criterion machinery,
+neither touches the gate):
+
+- **Change-on-change** (r of Δgrade vs ΔadjT within pitcher, 2024→2025): FF positive
+  control CONFIRMS the method and the link: r=+0.097 [+0.05,+0.15], P(r>0)=1.000 (n=1624).
+  SI shows the SAME magnitude, r=+0.087 [−0.06,+0.24], but at n=181 the CI straddles zero
+  (P=0.88) — consistent with the four-seam's link, not independently confirmed. Note the
+  size: even where confirmed, physics change explains ~1% of concurrent results change, so
+  trend language should be humble everywhere, not just on sinkers.
+- **GB-residual kill test** (YoY reliability of pitcher mean Target−xT on ground balls):
+  all pitches r=+0.074 [−0.03,+0.18] P=0.90 at floor 25, r=+0.039 P=0.68 at floor 40;
+  SI-only panel too small to measure (n=33, r≈0). **No confirmed repeatable skill inside
+  the part of the target the pooled EV/LA map smooths.** The criterion-widening premise —
+  that a GB-conditioned map would recover hidden sinker skill — is not supported at this
+  sample. Recommendation: do NOT spend the criterion-change effort now; revisit when the
+  2027 pair roughly doubles the panels.
+
 ## Iteration notes
 
 ### Iter 0 (task zero) — 2026-08-20

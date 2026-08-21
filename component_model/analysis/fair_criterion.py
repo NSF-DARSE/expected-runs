@@ -310,6 +310,9 @@ def load_pitches(args):
         # single-fastest-pitch anchor under the same three column names.
         stale += [c for c in ANCHOR_COLS if c not in cached.columns]
         if not stale:
+            # Re-checked on the cached frame too: a cache written before this
+            # guard existed can carry the same season-wide gap.
+            check_feature_coverage(cached, pair)
             return cached
         print(f"*** CACHE REBUILD: {cache} predates {', '.join(stale)} ***")
     df = pd.read_csv(args.data, usecols=available)
@@ -331,9 +334,39 @@ def load_pitches(args):
     df["is_lhb"] = (df["BatterSide"] == "Left").astype(float)
     df["is_inplay"] = df["PitchCall"] == "InPlay"
     df["is_ff"] = df["TaggedPitchType"].isin(FF_TYPES)
+    check_feature_coverage(df, pair)
     df = add_fastball_diffs(df)
     df.to_parquet(cache, index=False)
     return df
+
+
+def check_feature_coverage(df, pair):
+    """Refuse an extract whose model features are missing for a whole season.
+
+    The failure this catches: an extract that carries a FEATS column (so the
+    column check passes) but populated it for only ONE of the two seasons.
+    source_2025_2026_relspeed.csv is the live example -- RelSpeed was pulled
+    for the 2026 season only -- and without this guard the symptom is a
+    StandardScaler "0 sample(s)" error per pitch type, three scripts
+    downstream of the cause: every training-year row drops when the features
+    dropna. A column absent entirely still loads fine (OPTIONAL_COLS) and
+    fails on the KeyError in stuff_ridge as before; this guard is for the
+    half-present case, which is worse because it looks like a modeling bug
+    rather than a data-extract one.
+    """
+    role_to_real = {2024: pair[0], 2025: pair[1]}
+    for col in FEATS:
+        if col not in df.columns:
+            continue
+        for role, sub in df.groupby("year")[col]:
+            if sub.notna().sum() == 0:
+                raise RuntimeError(
+                    f"model feature {col!r} is entirely missing for the "
+                    f"{role_to_real.get(role, role)} season in this extract. "
+                    f"Every training row would drop, so nothing can fit. Use an "
+                    f"extract that carries {col} for BOTH seasons (e.g. the "
+                    f"realvelo_v3 extract for 2025/2026), or rebuild the extract."
+                )
 
 
 def add_fastball_diffs(df):

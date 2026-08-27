@@ -221,3 +221,66 @@ def test_attach_location_fails_loudly_when_no_earlier_season_exists():
     state = {"pitches": pit.copy()}
     with pytest.raises(ValueError, match="train the location map"):
         mod.attach_location(pit, state, None, _FakeFC, 2025, floor_n=1)
+
+
+# ---------------- trend block (windowed_delta + build_trend) ----------------
+
+def _trend_frame(n_recent=20, n_prior=20, velo_col="EffectiveVelo"):
+    """Pitches spread over two adjacent 30-day windows ending at the asof date."""
+    rng = np.random.default_rng(3)
+    n = n_recent + n_prior
+    dates = (["2026-04-20"] * n_prior) + (["2026-05-20"] * n_recent)
+    return pd.DataFrame({
+        "Date": dates,
+        "is_lhp": [0] * n,
+        "HorzBreak": rng.normal(14, 1, n),
+        "InducedVertBreak": rng.normal(8, 1, n),
+        velo_col: np.concatenate([rng.normal(90, 0.5, n_prior),
+                                  rng.normal(92, 0.5, n_recent)]),
+    })
+
+
+def test_windowed_delta_returns_none_below_floor():
+    df = _trend_frame(n_recent=5, n_prior=40)
+    out = ar.windowed_delta(df["EffectiveVelo"], df["Date"], "2026-05-25", floor_n=15)
+    assert out is None
+
+
+def test_windowed_delta_measures_the_shift_with_a_sane_se():
+    df = _trend_frame()
+    out = ar.windowed_delta(df["EffectiveVelo"], df["Date"], "2026-05-25", floor_n=15)
+    assert out is not None
+    assert out["delta"] == pytest.approx(2.0, abs=0.5)
+    assert 0 < out["se"] < 0.5
+    assert out["nRecent"] == 20 and out["nPrior"] == 20
+
+
+def test_build_trend_directions_are_tiered_by_validation():
+    """Arrow metadata ships only where the direction claim was validated:
+    velo 'up' for FF and Sinker, never for other types, and break-shape
+    metrics carry no direction anywhere."""
+    mod = _load_pages_module()
+    df = _trend_frame()
+    grades = np.full(len(df), 100.0)
+    for tname, want_velo in [("FF", "up"), ("Sinker", "up"),
+                             ("Cutter", None), ("Slider", None)]:
+        trend = mod.build_trend(df, grades, tname, "2026-05-25", floor_n=15)
+        assert trend["velo"]["direction"] == want_velo, tname
+        assert trend["movAngle"]["direction"] is None
+        assert trend["movMag"]["direction"] is None
+    # Stuff+ rows always say "up" (display scale); the frontend gates WHICH
+    # types render that row at all via isStuffPlusConfirmed.
+    trend = mod.build_trend(df, grades, "Sinker", "2026-05-25", floor_n=15)
+    assert trend["stuff"]["direction"] == "up"
+
+
+def test_build_trend_prefers_relspeed_and_falls_back_to_effectivevelo():
+    mod = _load_pages_module()
+    df = _trend_frame(velo_col="RelSpeed")
+    df["EffectiveVelo"] = 0.0  # would flatten the delta if wrongly chosen
+    grades = np.full(len(df), 100.0)
+    trend = mod.build_trend(df, grades, "FF", "2026-05-25", floor_n=15)
+    assert trend["velo"]["delta"] == pytest.approx(2.0, abs=0.5)
+    df2 = _trend_frame(velo_col="EffectiveVelo")
+    trend2 = mod.build_trend(df2, grades, "FF", "2026-05-25", floor_n=15)
+    assert trend2["velo"]["delta"] == pytest.approx(2.0, abs=0.5)

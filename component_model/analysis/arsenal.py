@@ -137,6 +137,40 @@ def recent_change(outings: pd.DataFrame, floor_n: int, asof: str) -> float | Non
     return float(recent_mean - prior_mean)
 
 
+def windowed_delta(values: pd.Series, dates: pd.Series, asof: str,
+                   floor_n: int) -> dict | None:
+    """Trailing 30 days vs the 30 days before, as a mean difference WITH its SE.
+
+    This is the re-entry contract for the arsenal table's removed change column:
+    the display may only put a sign on a movement it can also say is readable,
+    which needs a per-row standard error, not just a delta.
+
+    Returns None when either window is under floor_n pitches, so the UI renders
+    a blank -- a zero would claim "no change", which is a different statement.
+
+    The SE is Welch on pitch-level values. Pitches within one outing are not
+    independent, so this runs slightly small on metrics with real outing-level
+    drift; the 2-SE display gate is the margin that absorbs it.
+    """
+    asof_ts = pd.Timestamp(asof)
+    d = pd.to_datetime(dates)
+    v = pd.Series(np.asarray(values, dtype=float), index=d.index)
+    recent = v[(d > asof_ts - pd.Timedelta(days=RECENT_WINDOW_DAYS)) & (d <= asof_ts)]
+    prior_lo = asof_ts - pd.Timedelta(days=2 * RECENT_WINDOW_DAYS)
+    prior = v[(d > prior_lo) & (d <= asof_ts - pd.Timedelta(days=RECENT_WINDOW_DAYS))]
+    if len(recent) < floor_n or len(prior) < floor_n:
+        return None
+    se = float(np.sqrt(recent.var(ddof=1) / len(recent) + prior.var(ddof=1) / len(prior)))
+    return {
+        "recent": round(float(recent.mean()), 3),
+        "prior": round(float(prior.mean()), 3),
+        "delta": round(float(recent.mean() - prior.mean()), 3),
+        "se": round(se, 4),
+        "nRecent": int(len(recent)),
+        "nPrior": int(len(prior)),
+    }
+
+
 def type_mask(pit: pd.DataFrame, tags: set[str] | None) -> pd.Series:
     """Row mask selecting one pitch type.
 

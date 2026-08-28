@@ -23,6 +23,17 @@ FEATURE_LABELS = {
     "velocity_differential": "Velo vs his fastball",
     "is_lhp": "Throws left",
     "is_lhb": "Batter hits left",
+    # Added 2026-08-17 with the feature-set change. The _arm columns are the
+    # arm-side-mirrored copies of the two above, which is a frame convention
+    # rather than a different trait, so they share the label a coach knows.
+    "RelSpeed": "Release velocity",
+    "HorzBreak_arm": "Horizontal break",
+    "RelSide_arm": "Release side",
+    # These sit in the same card as the plain release rows and must not read as
+    # a second copy of them: they are |value - typical for his hand|, so an
+    # unusually high and an unusually low release both score as deviation.
+    "dev_relheight": "Release height, deviation from typical",
+    "dev_relside": "Release side, deviation from typical",
 }
 
 PITCH_TYPE_LABELS = {
@@ -61,6 +72,125 @@ def stamp_pitcher_ids(bundle: dict, pages: dict) -> None:
         row["pitcherId"] = by_name.get(row["name"])
 
 
+def enrich_stuff_attr_detail(bundle: dict, pages: dict) -> None:
+    """Attach each staff-board Stuff+ trait's raw value and percentile, sourced
+    from the pitcher's FF arsenal row, so the hover card can show more than bare
+    points.
+
+    08_staff_scores.py (upstream of stuffAttr/stuffAttrNoHand) lowercases every
+    feature name; 14_pitcher_pages.py (upstream of model.featureOrder and the
+    arsenal's typical/percentiles) keeps canonical casing (EffectiveVelo, not
+    effectivevelo). A case-sensitive join would null out every trait, so this
+    matches case-insensitively.
+
+    Even case-insensitively, a name can still fail to match -- a real naming
+    drift between the two scripts, not just casing. That is not a reason to
+    guess which feature was meant or to drop the points row that already shipped
+    from 08_staff_scores: the row keeps its points, value and percentile come
+    back null, and a line is printed so whoever runs publish notices instead of
+    the gap sitting quiet on the page forever.
+
+    Requires stamp_pitcher_ids to have already run, since it reads row["pitcherId"].
+    """
+    order = pages["model"]["featureOrder"]
+    index_by_lower = {f.lower(): i for i, f in enumerate(order)}
+    pitchers_by_id = {int(p["pitcherId"]): p for p in pages["pitchers"]}
+
+    for row in bundle["staff_board.json"]["pitchers"]:
+        names = {f for f, _ in row["stuffAttr"]} | {f for f, _ in row["stuffAttrNoHand"]}
+        pitcher = pitchers_by_id.get(row["pitcherId"]) if row["pitcherId"] is not None else None
+        ff = next((a for a in pitcher["arsenal"] if a["type"] == "FF"), None) if pitcher else None
+
+        detail: dict[str, dict] = {}
+        for name in names:
+            idx = index_by_lower.get(name.lower())
+            if ff is not None and idx is not None:
+                detail[name] = {"value": ff["typical"][idx], "percentile": ff["percentiles"][idx]}
+            else:
+                if ff is not None and idx is None:
+                    print(f"stuffAttr feature {name!r} on {row['name']!r} has no match in "
+                          f"model.featureOrder; shipping its points with no value/percentile")
+                detail[name] = {"value": None, "percentile": None}
+        row["stuffAttrDetail"] = to_native(detail)
+
+
+def enrich_loc_where(bundle: dict, pages: dict) -> None:
+    """Attach the fastball Location+ region decomposition to each staff-board row.
+
+    The board and the pitcher page show the same Location+ number, so they should
+    be able to answer "why" the same way. The rows are copied whole rather than
+    pre-truncated to the few the hover card has room for: the card can then show
+    its top handful AND an honest remainder line, instead of listing four rows
+    that quietly do not add up to the score above them.
+
+    Absent (not null) when the pitcher has no FF arsenal row or the bundle
+    predates locWhere, which is what lets the card fall back to the descriptive
+    zone/heart lines rather than rendering an empty breakdown.
+
+    Requires stamp_pitcher_ids to have already run.
+    """
+    pitchers_by_id = {int(p["pitcherId"]): p for p in pages["pitchers"]}
+    for row in bundle["staff_board.json"]["pitchers"]:
+        pitcher = pitchers_by_id.get(row["pitcherId"]) if row["pitcherId"] is not None else None
+        ff = next((a for a in pitcher["arsenal"] if a["type"] == "FF"), None) if pitcher else None
+        where = ff.get("locWhere") if ff else None
+        if where:
+            row["locWhere"] = to_native(where)
+            # The board has to be able to show the same three terms the page
+            # does, and the baseline is not recoverable from the rows.
+            if ff.get("locBaseline") is not None:
+                row["locBaseline"] = to_native(ff["locBaseline"])
+
+
+def build_type_board(pages: dict) -> dict:
+    """Per-pitch-type staff table, regrouped from the pitcher pages.
+
+    No new modeling: 14_pitcher_pages already fits every pitch type with its own
+    scale and its own qualified population, so this is the arsenal rows pivoted
+    from by-pitcher to by-type.
+
+    Carries Stuff+ and adjusted results, and deliberately not Location+ or
+    Pitching+. Location+ is a fastball score by a settled decision (reliable on
+    secondaries but with no predictive validity there), and Pitching+ is a blend
+    that includes it, so a board showing either for a slider would be inventing
+    it. Adjusted results is different in kind: it describes what happened with
+    luck, defense and opponent quality removed, and a description does not have
+    to predict next season to be true. It is None for a type with too few
+    qualifying pitchers to set a scale.
+
+    `nQualified` rides along per type because the scales rest on very different
+    populations (four-seam on thousands, splitter on tens), and a grade is not
+    readable without it.
+    """
+    artifacts = pages["model"]["byPitchType"]
+    by_type: dict[str, list[dict]] = {}
+    for p in pages["pitchers"]:
+        for a in p["arsenal"]:
+            by_type.setdefault(a["type"], []).append({
+                "pitcherId": int(p["pitcherId"]),
+                "name": p["name"],
+                "hand": p["hand"],
+                "n": a["n"],
+                "usage": a["usage"],
+                "stuff": a["stuff"],
+                "adjRes": a.get("adjRes"),
+                "avgVelo": a.get("avgVelo"),
+                "aboveFloor": a["aboveFloor"],
+            })
+    return to_native({
+        "types": [
+            {
+                "type": t,
+                "label": PITCH_TYPE_LABELS.get(t, t),
+                "nQualified": artifacts.get(t, {}).get("nQualified"),
+                "sampleFloor": artifacts.get(t, {}).get("sampleFloor"),
+                "pitchers": sorted(rows, key=lambda r: r["stuff"], reverse=True),
+            }
+            for t, rows in sorted(by_type.items(), key=lambda kv: -len(kv[1]))
+        ],
+    })
+
+
 def build_pitcher_bundle(pages: dict) -> dict[str, dict]:
     model = dict(pages["model"])
     missing = [f for f in model["featureOrder"] if f not in FEATURE_LABELS]
@@ -84,4 +214,5 @@ def build_pitcher_bundle(pages: dict) -> dict[str, dict]:
             "pitches": p["pitches"],
         })
         files[f"pitchers/{p['pitcherId']}.json"] = body
+    files["staff_by_type.json"] = build_type_board(pages)
     return files

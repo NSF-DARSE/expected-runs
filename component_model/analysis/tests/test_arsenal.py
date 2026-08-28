@@ -50,6 +50,92 @@ def test_display_scale_uses_only_rows_above_the_floor():
     assert sd == pytest.approx(np.std([0.0, 0.01, -0.01], ddof=1))
 
 
+def test_result_label_maps_called_and_swinging_strikes():
+    assert ar.result_label("StrikeCalled") == "Called strike"
+    assert ar.result_label("StrikeSwinging") == "Swinging strike"
+
+
+def test_result_label_maps_a_ball():
+    assert ar.result_label("BallCalled") == "Ball"
+
+
+def test_result_label_maps_a_foul_ball():
+    assert ar.result_label("FoulBall") == "Foul ball"
+
+
+def test_result_label_maps_in_play_result_to_a_single():
+    assert ar.result_label("InPlay", "Single") == "Single"
+
+
+def test_result_label_maps_in_play_result_to_an_out():
+    assert ar.result_label("InPlay", "Out") == "Out"
+
+
+def test_result_label_maps_other_in_play_results():
+    assert ar.result_label("InPlay", "HomeRun") == "Home run"
+    assert ar.result_label("InPlay", "Error") == "Reached on error"
+
+
+def test_result_label_is_none_for_bullpen_shaped_undefined_pitch_call():
+    """Bullpen/practice data tags PitchCall Undefined throughout; there is no
+    real call to report, so this must be absent (None), not a placeholder.
+    """
+    assert ar.result_label("Undefined") is None
+    assert ar.result_label("Undefined", "Single") is None
+
+
+def test_result_label_is_none_for_a_missing_pitch_call():
+    assert ar.result_label(None) is None
+    assert ar.result_label(float("nan")) is None
+
+
+def test_result_label_is_none_for_in_play_with_no_play_result():
+    """An extract that predates the PlayResult column, or a genuinely blank
+    cell: there is no result to report, so this omits rather than guesses.
+    """
+    assert ar.result_label("InPlay", None) is None
+    assert ar.result_label("InPlay", "") is None
+    assert ar.result_label("InPlay", "Undefined") is None
+
+
+def test_result_label_surfaces_an_unmapped_pitch_call_visibly_not_wrong():
+    """An unrecognized PitchCall must never silently become one of the known
+    labels (that would be a coach-facing lie) and must never disappear (that
+    would look identical to the bullpen absence case). It has to be both
+    visible and honestly different from every mapped label.
+    """
+    label = ar.result_label("SomeNewTrackManValue")
+    assert label is not None
+    assert label not in ar.PITCH_CALL_LABELS.values()
+    assert "SomeNewTrackManValue" in label
+
+
+def test_result_label_surfaces_an_unmapped_play_result_visibly_not_wrong():
+    label = ar.result_label("InPlay", "Sacrifice2026")
+    assert label is not None
+    assert label not in ar.PLAY_RESULT_LABELS.values()
+    assert "Sacrifice2026" in label
+
+
+def test_batter_label_passes_through_a_real_name():
+    assert ar.batter_label("Smith, John") == "Smith, John"
+
+
+def test_batter_label_strips_surrounding_whitespace():
+    assert ar.batter_label("  Smith, John  ") == "Smith, John"
+
+
+def test_batter_label_is_none_for_blank_missing_or_non_string_values():
+    """Bullpen/practice rows have no real opposing batter. None must cover a
+    blank string, whitespace-only, a missing (None) value, and a NaN float --
+    all real absence, never a placeholder.
+    """
+    assert ar.batter_label("") is None
+    assert ar.batter_label("   ") is None
+    assert ar.batter_label(None) is None
+    assert ar.batter_label(float("nan")) is None
+
+
 def _toy_model(n_feats=4, seed=3):
     """A standardizer + linear model whose parameters we control exactly."""
     rng = np.random.default_rng(seed)
@@ -182,3 +268,127 @@ def test_type_mask_treats_two_seam_as_sinker():
         "is_ff": [False, False, False],
     })
     assert list(ar.type_mask(pit, {"Sinker", "TwoSeamFastBall"})) == [True, True, False]
+
+
+# ---- Adj Results ladder (08_staff_scores.py): Target -> xT -> adjT --------
+#
+# The ladder shows the same C2 quantity (adjT, Adj Results) at the two earlier
+# stages it is built from (RESULTS.md, "The fair criterion"): C0 raw Target,
+# C1 xT. Summing a level plus the two gaps back to the far endpoint is pure
+# telescoping algebra (a + (b-a) + (c-b) == c) and holds no matter what (mu,
+# sd) went into a, b and c individually -- that part can never break. What
+# shared moments actually buy is that a GAP VALUE MEANS ONLY ONE THING: with
+# one (mu, sd) for every level, "Defense & Luck" collapses to
+# -15*(xt-target)/sd, a pure function of the raw xt-target difference and
+# nothing else, so the same physical luck swing prices identically everywhere
+# on the board. Per-level moments (the "obvious" per-quantity choice a future
+# reader will be tempted to make) drag in each level's own mu and sd, so the
+# SAME raw luck swing prices differently depending on the pitcher's unrelated
+# absolute level -- a real inconsistency a coach could eventually notice, even
+# though every individual card still closes arithmetically. That is the
+# "lying in a way nobody could see": each card is locally consistent, and the
+# whole board is not.
+
+def test_shared_scale_ladder_telescopes_exactly():
+    mu, sd = 0.0016, 0.0194  # the adjT (C2) population moments, per RESULTS.md
+    target, xt, adj = 0.0055, 0.0011, -0.0009
+    runs_allowed = ar.to_display(target, mu, sd)
+    exp_runs_allowed = ar.to_display(xt, mu, sd)
+    adj_results = ar.to_display(adj, mu, sd)
+    gap_defense_luck = exp_runs_allowed - runs_allowed
+    gap_opponent = adj_results - exp_runs_allowed
+    assert runs_allowed + gap_defense_luck + gap_opponent == pytest.approx(adj_results)
+
+
+def test_shared_scale_prices_the_same_luck_swing_identically():
+    """The property a shared scale buys: two pitchers with the IDENTICAL
+    (xt - target) gap -- the same physical luck/defense swing -- must get the
+    identical 'Defense & Luck' point value, regardless of where their raw
+    numbers otherwise sit.
+    """
+    mu, sd = 0.0016, 0.0194
+    pairs = [(0.0055, 0.0011), (0.0002, -0.0042)]  # both: xt - target == -0.0044
+    gaps = [ar.to_display(xt, mu, sd) - ar.to_display(target, mu, sd) for target, xt in pairs]
+    assert gaps[0] == pytest.approx(gaps[1])
+
+
+def test_per_level_scale_prices_the_same_luck_swing_differently():
+    """Regression guard for the change a future reader will be tempted to
+    make: giving Target and xT their OWN population (mu, sd) instead of
+    reusing adjT's. Each individual card still closes (see the telescoping
+    test above -- that identity cannot break), but the SAME raw luck swing
+    now prices differently depending on unrelated absolute level, which is
+    exactly the inconsistency shared scale exists to rule out.
+    """
+    mu_t, sd_t = 0.002, 0.028    # Target's own population moments
+    mu_x, sd_x = 0.0016, 0.020   # xT's own population moments
+    pairs = [(0.0055, 0.0011), (0.0002, -0.0042)]  # both: xt - target == -0.0044
+    gaps = [ar.to_display(xt, mu_x, sd_x) - ar.to_display(target, mu_t, sd_t) for target, xt in pairs]
+    assert gaps[0] != pytest.approx(gaps[1])
+
+
+# ---- out-of-zone banding -----------------------------------------------------
+
+def _region_at(plate_side, height, batter_side="Right"):
+    """Region label for a single pitch, through the production path."""
+    import pandas as pd
+    df = pd.DataFrame({"PlateLocSide": [plate_side], "PlateLocHeight": [height],
+                       "BatterSide": [batter_side]})
+    return ar.region_series(df).iloc[0]
+
+
+def test_in_zone_regions_are_untouched_by_the_out_of_zone_split():
+    """Splitting the miss into bands must not move a single in-zone label."""
+    assert _region_at(0.0, 2.5) == "Middle, middle"
+    # Away is negative PlateLocSide for a RHH, low is under the middle third.
+    assert _region_at(-0.7, 1.8) == "Down and away"
+    assert _region_at(0.7, 3.3) == "Up and in"
+    # A pitch on the zone edge is still in the zone, not "just off" it.
+    assert _region_at(-ar.ZONE_HALF_WIDTH, 2.5) == "Middle and away"
+    assert _region_at(0.0, ar.ZONE_TOP) == "Up, middle"
+
+
+@pytest.mark.parametrize("inches_out,expected", [
+    (0.5, "Just off the zone"),
+    (2.0, "Just off the zone"),    # exactly on the first boundary
+    (2.01, "Off the zone"),
+    (5.9, "Off the zone"),
+    (6.0, "Off the zone"),         # exactly on the second boundary
+    (6.1, "Way off the zone"),
+    (18.0, "Way off the zone"),
+])
+def test_out_of_zone_bands_split_by_distance_horizontally(inches_out, expected):
+    side = -(ar.ZONE_HALF_WIDTH + inches_out / 12.0)   # away from a RHH
+    assert _region_at(side, 2.5) == expected
+
+
+@pytest.mark.parametrize("inches_out,expected", [
+    (1.0, "Just off the zone"),
+    (4.0, "Off the zone"),
+    (10.0, "Way off the zone"),
+])
+def test_out_of_zone_bands_apply_to_height_misses_too(inches_out, expected):
+    """A miss over the hitter's head is banded the same way as one off the
+    side; the band names must not read as side-only."""
+    assert _region_at(0.0, ar.ZONE_TOP + inches_out / 12.0) == expected
+    assert _region_at(0.0, ar.ZONE_BOTTOM - inches_out / 12.0) == expected
+
+
+def test_out_of_zone_distance_is_the_corner_diagonal_when_both_bands_miss():
+    """A pitch missing in BOTH directions is measured to the zone's corner, not
+    to the nearer edge -- 3-4-5, so 3in wide and 4in high is 5in out."""
+    side = -(ar.ZONE_HALF_WIDTH + 3.0 / 12.0)
+    height = ar.ZONE_TOP + 4.0 / 12.0
+    assert ar._zone_distance_inches([side], [height])[0] == pytest.approx(5.0)
+    assert _region_at(side, height) == "Off the zone"
+
+
+def test_zone_distance_is_zero_inside_the_zone():
+    assert ar._zone_distance_inches([0.0], [2.5])[0] == pytest.approx(0.0)
+
+
+def test_out_of_zone_bands_are_handedness_symmetric():
+    """The band depends on distance from the rectangle, which is symmetric in
+    side, so the mirrored pitch to a LHH lands in the same band."""
+    inside_out = ar.ZONE_HALF_WIDTH + 4.0 / 12.0
+    assert _region_at(-inside_out, 2.5, "Right") == _region_at(inside_out, 2.5, "Left")

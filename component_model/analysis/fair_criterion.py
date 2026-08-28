@@ -4,7 +4,9 @@ Everything numerically load-bearing is defined here exactly once:
   - data loading (dedup on PitchUID, keep first) with a local parquet cache
   - xT: luck/defense-stripped expected run value (EV/LA map for balls in play)
   - adjT: opponent-adjusted xT (league means + batter effects shrunk toward league)
-  - the fixed Stuff+ reference (Ridge alpha=10 on 12 physical features, trained 2024)
+  - the fixed Stuff+ reference (Ridge alpha=10 on the FEATS physical features,
+    trained 2024; the count is deliberately not restated here, since it has
+    changed twice and the stale number outlived the truth both times)
   - the (x,z) plate-location run-value maps, pooled and count-conditioned
   - the qualified pitcher panel (100+ four-seam FF in both 2024 and 2025)
 
@@ -205,10 +207,64 @@ USECOLS = ["PitchUID", "Date", "Pitcher", "PitcherId", "PitcherThrows", "Pitcher
            "Level", "GameID", "Inning", "Top/Bottom", "PAofInning", "PitchofPA"]
 
 # Read when the extract has them, skipped when it does not (see load_pitches).
-OPTIONAL_COLS = ["RelSpeed"]
+# Optional rather than required because the extract the scorer consumes is a
+# trimmed subset of the pipeline's output, and some trims drop RelSpeed;
+# requiring it here would make a source CSV every other script reads fine fail
+# to open at all. RelSpeed is a MODEL feature now, not the display-only column
+# it was when this list was written.
+#
+# PlayResult ADDED 2026-08-17 for the pitcher-page per-pitch result label
+# (14_pitcher_pages.py / arsenal.result_label): it is what turns an "InPlay"
+# PitchCall into "Single"/"Out"/etc. Optional for the same reason RelSpeed is --
+# a trimmed extract that lacks it must still load, just with every ball in
+# play falling through result_label's honest "no usable result" path (None)
+# instead of failing the whole read.
+OPTIONAL_COLS = ["RelSpeed", "PlayResult"]
 
 RIDGE_ALPHA = 10
-BATTER_K = 200
+
+# Shrinkage weight for the batter effect in add_adjusted: a batter with K pitches
+# is credited with half his own measured effect and half his league's average.
+#
+# Was 200, chosen by convention rather than tuned. Swept 2026-08-14 over
+# K = 0, 25, 50, 100, 200, 400, 800, 1600, 3200 and infinity, on both available
+# year pairs (2024->2025, 649 panel pitchers; 2025->2026, 825), scoring
+# year-over-year reliability and predictive validity with a paired bootstrap on
+# the differences against K=200. Lower K was better on reliability throughout,
+# monotonically, and infinity (no batter adjustment at all) was the worst option
+# everywhere, so the adjustment itself earns its place.
+#
+# Three things had to be ruled out before believing that, because the first read
+# of the sweep was reliability improving while validity stayed flat, which is the
+# signature of a score absorbing a stable context feature rather than measuring
+# pitching better:
+#   - Self-contamination. A batter's effect includes the pitches thrown to him by
+#     the pitcher being evaluated, so a pitcher can subtract his own achievement
+#     back out. Recomputing leave-one-pitcher-out moved every K by ~0.001-0.002,
+#     far inside bootstrap noise. Real, but not what drives the result.
+#   - Thin-sample exposure leaking in. At low K a 9-pitch batter has his full raw
+#     mean subtracted, neutralizing those pitches; if "faces thin-sample batters"
+#     were a persistent pitcher trait it would inflate reliability for free. It
+#     is not persistent (year-over-year r of that share is 0.08-0.27, against
+#     ~0.8 for a real trait), the reliability gain is SMALLEST in the
+#     highest-exposure tercile rather than largest, and the gain survives a sweep
+#     that leaves every batter under n=100 completely unadjusted.
+#   - The flat validity was itself an artifact of the target. Validity had been
+#     measured against year-2 mean xT, which is not opponent adjusted and so
+#     still carries the opponent variance this parameter exists to remove; a
+#     predictor cannot predict noise the target retains. Re-run against year-2
+#     adjT held fixed at K=200 (hash-checked as invariant across the sweep, so
+#     not circular), validity does rise as K falls, outside 1 SE at K=50 and
+#     K=100 on both pairs.
+#
+# 100 rather than 0 because validity stops improving below ~50 while reliability
+# keeps climbing, and an unshrunk estimator trusting a 9-pitch batter as fully as
+# a 900-pitch one is not something this data can justify. The practical effect is
+# small: median |change| to a pitcher's displayed Adj Results is about 0.2 points
+# on the 100+/-15 scale, p90 about 0.5, max 1.6. Adopted for correctness while
+# the extract was being rebuilt anyway, not because any grade visibly moves.
+BATTER_K = 100
+
 PANEL_MIN_FF = 100
 
 
@@ -298,8 +354,7 @@ def load_pitches(args):
     # RelSpeed is a MODEL feature (FEATS) but optional at load so extracts that predate it
     # still open; stuff_ridge then fails loudly on the missing column rather than here. A
     # cache written before RelSpeed joined the read must be rebuilt, not served -- serving
-    # it would surface as a KeyError far from the cause. (Backported from
-    # real-velo-context, where the same column was display-only.)
+    # it would surface as a KeyError far from the cause.
     header = pd.read_csv(args.data, nrows=0).columns
     available = USECOLS + [c for c in OPTIONAL_COLS if c in header]
     if os.path.exists(cache):

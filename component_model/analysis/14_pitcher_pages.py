@@ -142,6 +142,38 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
                 "loc": (float(ar.to_display(sub["loc"].mean(), state["loc_mu"], state["loc_sd"]))
                         if tname == "FF" else None),
                 "recentChange": change,
+                # Real release velocity, as context beside the pitch type -- not a
+                # grade and not a trait. No ridge coefficient touches RelSpeed (the
+                # model sees EffectiveVelo and a differential whose level cancels),
+                # so this can never carry a percentile or a Worth column. It is the
+                # mean over the same graded pitches that produce "n" and "stuff", so
+                # the number a coach reads always describes the sample beside it.
+                # None when the source extract has no RelSpeed column, which is
+                # the state of the trimmed extract in use through 2026-08. A hard
+                # failure here would block every publish over a display field the
+                # page already renders as absent, so the value is optional and
+                # only its correctness is enforced downstream.
+                "avgVelo": (float(sub["RelSpeed"].mean())
+                            if "RelSpeed" in sub.columns else None),
+                # Where his Location+ came from. Fastball only, because that is
+                # the only type with a Location+ at all.
+                "locWhere": (ar.location_decomposition(
+                    sub, state["league_cells"], state["loc_mu"], state["loc_sd"])
+                    if tname == "FF" and state.get("league_cells") else None),
+                # The third term of that split: D1's own location mix, which is
+                # the same number for every pitcher and therefore explains none
+                # of the gap between them. One scalar rather than a column, so a
+                # reader cannot mistake it for something he did.
+                "locBaseline": (ar.location_baseline(
+                    state["league_cells"], state["loc_mu"], state["loc_sd"])
+                    if tname == "FF" and state.get("league_cells") else None),
+                # What actually happened to this pitch type, on the same display
+                # scale. None when the type has too few qualifying pitchers to
+                # define a scale, rather than a number resting on nothing.
+                "adjRes": (float(ar.to_display(sub["adjT"].mean(),
+                                               state["adj_mu"], state["adj_sd"]))
+                           if state.get("adj_sd") and "adjT" in sub.columns
+                           and sub["adjT"].notna().any() else None),
                 "trend": build_trend(sub, grades, tname, asof, floor_n),
                 "aboveFloor": bool(len(sub) >= floor_n),
                 "typical": [float(v) for v in sub[feats].mean().values],
@@ -157,15 +189,47 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
             for _, o in per_outing.iterrows():
                 outings.append({"date": str(o["date"]), "type": tname,
                                 "n": int(o["n"]), "stuff": float(o["stuff"])})
+            grades = ar.to_display(sub["ridge_pred"].values, mu, sd)
+            # Per-pitch Location+ uses its OWN pitch-level scale (loc_pitch_mu/
+            # loc_pitch_sd), NOT the season pair (loc_mu/loc_sd). This is a
+            # deliberate departure from Stuff+'s one-scale rule: for Location+
+            # the season scale's moments come from the spread of PER-PITCHER
+            # MEANS, which is far tighter than the spread of individual pitches
+            # (measured sd 0.008769 vs 0.0682), so routing a single pitch
+            # through the season scale put real pitches at -281.5 to +232.7 on
+            # a 100+/-15 page. The pitch-level scale is still centered so 100
+            # means "an average pitch" the same way the season scale's 100
+            # means "an average pitcher" -- just with a divisor sized for the
+            # thing actually being displayed. See arsenal.pitch_display_scale.
+            # Fastball only, since Location+ is.
+            loc_grades = (ar.to_display(sub["loc"].values, state["loc_pitch_mu"], state["loc_pitch_sd"])
+                          if tname == "FF" else [None] * len(sub))
             dates = pd.to_datetime(sub["Date"]).dt.strftime("%Y-%m-%d").values
-            for (_, p), g, d in zip(sub.iterrows(), grades, dates):
-                pitch_rows.append({
+            for (_, p), g, lg, d in zip(sub.iterrows(), grades, loc_grades, dates):
+                row = {
                     "d": str(d), "t": tname,
                     "x": round(float(p["PlateLocSide"]), 3),
                     "z": round(float(p["PlateLocHeight"]), 3),
                     "c": str(p["count12"]), "g": float(g),
+                    "l": None if lg is None else float(lg),
                     "f": [float(p[f]) for f in feats],
-                })
+                }
+                # Coach-legible outcome ("Called strike", "Single", ...) and the
+                # opposing batter's name -- backlog item 5, 2026-08-17 staff
+                # meeting: a coach placing a pitch from memory ("I gave up a
+                # single on that one"). Both optional and absent-tolerant:
+                # bullpen/practice rows have PitchCall Undefined throughout and
+                # no real batter, and must ship with neither key rather than a
+                # placeholder. p.get(...) returns None for a column this
+                # extract never loaded (e.g. no PlayResult) the same way it
+                # does for a genuinely missing cell.
+                res = ar.result_label(p.get("PitchCall"), p.get("PlayResult"))
+                if res is not None:
+                    row["r"] = res
+                batter = ar.batter_label(p.get("Batter"))
+                if batter is not None:
+                    row["b"] = batter
+                pitch_rows.append(row)
         arsenal_rows.sort(key=lambda r: -r["usage"])
         records.append({"pitcherId": int(pid), "name": name, "hand": hand,
                         "arsenal": arsenal_rows, "outings": outings, "pitches": pitch_rows})
@@ -187,6 +251,18 @@ def build_model_artifact(fitted_by_type: dict, feats: list[str]) -> dict:
                 # per-type artifact keeps a uniform shape.
                 "displayLocMu": s.get("loc_mu"),
                 "displayLocSd": s.get("loc_sd"),
+                # PITCH-LEVEL Location+ moments -- deliberately separate fields,
+                # never overwriting displayLocMu/displayLocSd above. Those two
+                # are what the SEASON Location+ score is built from (spread of
+                # per-pitcher means) and must not move. These describe the
+                # spread of individual pitches instead, which is what the
+                # per-pitch tooltip number actually needs. Named with the
+                # "Pitch" infix specifically so a reader cannot mistake one
+                # pair for the other. Optional (None when absent, e.g. a
+                # non-fastball type or a state that predates this field) so a
+                # frontend built against an older bundle degrades gracefully.
+                "displayPitchLocMu": s.get("loc_pitch_mu"),
+                "displayPitchLocSd": s.get("loc_pitch_sd"),
                 "sampleFloor": SAMPLE_FLOOR,
                 "nQualified": s["n_qualified"],
             }
@@ -246,6 +322,18 @@ def attach_location(pit: pd.DataFrame, state: dict, tags, fc_module, season_year
     are the same qualified-population moments 08_staff_scores.py uses for Loc100
     (its `n_ff >= 100` is this module's SAMPLE_FLOOR).
 
+    ALSO derives a SECOND, pitch-level pair (loc_pitch_mu/loc_pitch_sd) for the
+    per-pitch Location+ shown on the strike-zone tooltip. This must stay a
+    separate pair from loc_mu/loc_sd, never collapsed back into one:
+    loc_mu/loc_sd come from the spread of PER-PITCHER SEASON MEANS and are
+    correct for the season score, which compares a pitcher's mean against the
+    distribution of pitcher means. Applying that same (mu, sd) to an individual
+    pitch is the bug this fix corrects -- a season mean is stable and a single
+    pitch is not, so the season scale's divisor is far too small for pitch-level
+    values (measured: pitcher-mean sd 0.008769 vs pitch-level sd 0.0682, a 7.8x
+    gap) and pushed real pitches to -281.5 or +232.7 on a 100+/-15 page. See
+    arsenal.pitch_display_scale's docstring for the full argument.
+
     floor_n is a parameter rather than the module constant only so tests can drive
     this on small synthetic frames; production passes SAMPLE_FLOOR.
     """
@@ -253,6 +341,7 @@ def attach_location(pit: pd.DataFrame, state: dict, tags, fc_module, season_year
     if tags is not None:
         season["loc"] = np.nan
         state["loc_mu"] = state["loc_sd"] = None
+        state["loc_pitch_mu"] = state["loc_pitch_sd"] = None
         return
     ff_all = pit[ar.type_mask(pit, tags)].copy()
     ff_all = ff_all[ff_all["PlateLocSide"].notna() & ff_all["PlateLocHeight"].notna()]
@@ -273,12 +362,30 @@ def attach_location(pit: pd.DataFrame, state: dict, tags, fc_module, season_year
         per_pitcher["mean"].values, (per_pitcher["size"] >= floor_n).values
     )
     state["loc_mu"], state["loc_sd"] = loc_mu, loc_sd
+    # The population a pitcher is compared against has to be the one the scale's
+    # zero point came from, or the breakdown carries a constant offset that is
+    # about the population gap rather than about him.
+    qualified_ids = set(per_pitcher.index[per_pitcher["size"] >= floor_n])
+    state["loc_qualified_ids"] = qualified_ids
+
+    # Pitch-level scale, over the SAME qualifying population loc_mu/loc_sd used
+    # (same per_pitcher["size"] >= floor_n filter), so the season scale and the
+    # per-pitch scale describe the same set of pitchers and differ only in
+    # whether they were built from pitcher means or raw pitches. See
+    # arsenal.pitch_display_scale's docstring for why this has to be a second,
+    # separately-named pair rather than reusing loc_mu/loc_sd.
+    qualified_pitches = season.loc[season["PitcherId"].isin(qualified_ids), "loc"].values
+    state["loc_pitch_mu"], state["loc_pitch_sd"] = ar.pitch_display_scale(qualified_pitches)
 
 
 def main() -> int:
     args = fc.paths()
     pit = fc.load_pitches(args)
     fc.add_xt(pit)
+    # Needed for per-type adjusted results: xT with the league mean and a shrunk
+    # batter effect removed, so the column reflects the pitcher rather than who
+    # he happened to face.
+    fc.add_adjusted(pit)
     fc.add_count_cols(pit)
 
     fitted = {}
@@ -289,6 +396,13 @@ def main() -> int:
             print(f"skipping {tname}: {err}")
             continue
         attach_location(pit, state, tags, fc, SEASON_ROLE_YEAR)
+        if tname == "FF":
+            # Snapshot the D1 comparison population HERE. The team filter further
+            # down rewrites state["pitches"] to one staff, and a decomposition
+            # built after that compares a pitcher against his own teammates while
+            # the card calls the column D1.
+            state["league_cells"] = ar.league_cell_table(
+                state["pitches"], state.get("loc_qualified_ids"))
         fitted[tname] = state
         print(f"{tname}: {len(state['pitches'])} pitches, {state['n_qualified']} qualified")
 

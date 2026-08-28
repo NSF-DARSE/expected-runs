@@ -1,7 +1,46 @@
 """Lightweight bundle validation — fail loudly before upload."""
 REQUIRED_ROW_KEYS = {"id","name","hand","ff","stuff","loc","adjres","pitch",
                      "whiff","zone","heart","meanHeight","locFlag","stuffAttr",
-                     "stuffNoHand","pitchNoHand","stuffAttrNoHand","pitcherId"}
+                     "stuffNoHand","pitchNoHand","stuffAttrNoHand","pitcherId",
+                     "stuffAttrDetail"}
+
+# resLadder is optional -- see build_bundle._res_ladder -- but a row that
+# carries it at all has to carry the whole thing, the same contract locWhere
+# has with locBaseline below.
+RES_LADDER_KEYS = {"runsAllowed", "expRunsAllowed", "runsAllowedRaw",
+                   "expRunsAllowedRaw", "adjResultsRaw"}
+
+
+def _check_stuff_attr_detail(row: dict) -> None:
+    """stuffAttrDetail carries one value/percentile pair per feature named in
+    stuffAttr or stuffAttrNoHand. A feature in one of those lists with no entry
+    here would mean its points shipped with nothing to back them up; a value
+    present without its percentile (or the reverse) means the join that built
+    the pair only half-ran, which is a bug in the enrichment step, not a real
+    "no data" case -- the real "no data" case (no pitcher file, or the feature
+    name did not match model.featureOrder) always nulls both together. A
+    percentile outside 0-100 is the same reference-population failure the
+    arsenal percentile check above guards against.
+    """
+    detail = row["stuffAttrDetail"]
+    names = {f for f, _ in row["stuffAttr"]} | {f for f, _ in row["stuffAttrNoHand"]}
+    missing = names - set(detail)
+    if missing:
+        raise ValueError(f"pitcher row {row.get('name')} stuffAttrDetail missing {missing}")
+    for name, d in detail.items():
+        has_value = d["value"] is not None
+        has_pct = d["percentile"] is not None
+        if has_value != has_pct:
+            raise ValueError(
+                f"pitcher row {row.get('name')} stuffAttrDetail[{name!r}] has a value with no "
+                f"percentile or a percentile with no value; they should always be null together"
+            )
+        if has_pct and not 0 <= d["percentile"] <= 100:
+            raise ValueError(
+                f"pitcher row {row.get('name')} stuffAttrDetail[{name!r}] percentile "
+                f"{d['percentile']} is outside 0-100"
+            )
+
 
 def validate_bundle(bundle: dict) -> None:
     m = bundle["manifest.json"]
@@ -17,12 +56,68 @@ def validate_bundle(bundle: dict) -> None:
             raise ValueError(f"pitcher row {r.get('name')} missing {missing}")
         if r["locFlag"] not in ("", "caution", "small sample"):
             raise ValueError(f"bad locFlag {r['locFlag']}")
+        # The board card shows the same three terms the pitcher page does, and
+        # the baseline is not recoverable from the rows, so a board row carrying
+        # a decomposition without one would silently under-report the score.
+        if r.get("locWhere") and not isinstance(r.get("locBaseline"), (int, float)):
+            raise ValueError(
+                f"board row {r.get('name')} has a Location+ decomposition but no "
+                f"numeric locBaseline"
+            )
+        if r.get("resLadder") is not None:
+            missing_ladder = RES_LADDER_KEYS - set(r["resLadder"])
+            if missing_ladder:
+                raise ValueError(
+                    f"board row {r.get('name')} resLadder missing {missing_ladder}"
+                )
+            _check_display_band(r["resLadder"]["runsAllowed"], ADJRES_BAND,
+                                key="staff_board.json", field="Runs Allowed", ptype="FF")
+            _check_display_band(r["resLadder"]["expRunsAllowed"], ADJRES_BAND,
+                                key="staff_board.json", field="Expected Runs Allowed", ptype="FF")
+        _check_stuff_attr_detail(r)
 
 
 REQUIRED_ARSENAL_KEYS = {"type", "label", "n", "usage", "stuff", "loc",
-                         "recentChange", "trend", "aboveFloor", "typical",
-                         "percentiles"}
+                         "recentChange", "trend", "avgVelo", "locWhere", "locBaseline",
+                         "aboveFloor", "typical", "percentiles"}
+
+# How far the location decomposition may drift from the score it explains before
+# the publish aborts. The rows are an exact algebraic split of the same mean, so
+# the only legitimate gap is float error: rare cells are pooled into an
+# "Everywhere else" row rather than discarded. A loose tolerance here would have
+# hidden exactly the bug this caught, where dropped cells cost 1.5 points.
+LOC_DECOMP_TOLERANCE = 0.01
+# The occupancy/placement/baseline split is the same algebra rearranged, with no
+# pooling step that could legitimately lose anything, so it is held to float
+# error rather than to the looser tolerance above.
+LOC_SPLIT_TOLERANCE = 1e-9
+REQUIRED_LOC_WHERE_KEYS = {"region", "n", "share", "leagueShare",
+                           "points", "occupancyPoints", "placementPoints",
+                           "value", "leagueValue", "byCount"}
+
+# byCount is a frequency-only nested breakdown (see arsenal.location_decomposition
+# for why it carries no points), so its contract is lighter than the row it
+# sits under: just enough that the page can render "N pitches, X% of this spot"
+# per count bucket without a KeyError.
+REQUIRED_BY_COUNT_KEYS = {"count", "n", "share"}
+
+# leagueShare (D1's own count-bucket split of the same region, arsenal.py's
+# _league_by_count_share) is OPTIONAL on a byCount entry, not required: a
+# bundle built between the region-collapse and this change has byCount with
+# no leagueShare at all, and even a fresh bundle omits it on a bucket the
+# league table has no weight in at all (see league_cell_table's count_weight
+# docstring -- that is a real absence, not a bug). When present it has to be
+# a share like any other.
 REQUIRED_PITCH_KEYS = {"d", "t", "x", "z", "c", "g", "f"}
+
+# `r` (result label, e.g. "Called strike"/"Single") and `b` (batter name) are
+# OPTIONAL per-pitch fields, added 2026-08-17 so a coach can place a pitch from
+# memory. Bullpen/practice rows have neither (see arsenal.result_label /
+# batter_label), so absence itself is not checked here -- only that a key
+# which IS present is never blank. A present-but-empty value would mean the
+# upstream omit-when-absent logic failed silently and shipped a placeholder a
+# coach could mistake for a real call or a real name.
+OPTIONAL_PITCH_STRING_KEYS = ("r", "b")
 
 # Plausible-range guard for scores on the 100+/-15 display scale. A raw
 # expected-run value (~0.00x, lower = better) or an un-negated score shipped
@@ -47,7 +142,40 @@ DISPLAY_BAND = (40.0, 160.0)
 # point of tightness beyond that is pure downside: one real team's worst pitch
 # already grades 19.9, leaving under 10 points of headroom, and a genuinely awful
 # pitch on some other staff would abort a publish for no diagnostic gain.
-PITCH_GRADE_BAND = (1.0, 250.0)
+#
+# LOWER BOUND MOVED BELOW ZERO 2026-08-17. The floor of 1.0 above was doing two
+# jobs, and the reasoning above only justifies one of them. A single pitch can
+# legitimately grade below zero: the model changed to take release velocity as
+# a direct input, and an 80 mph "fastball" with -11.9 inches of induced vertical
+# break -- a breaking ball tagged FF, or a bad capture -- now grades -16.9. That
+# is the correct grade for that pitch, and aborting a publish over it is exactly
+# the "no diagnostic gain" case this comment already warns about.
+#
+# The unscaled-value job the floor was really doing does NOT survive the move,
+# since an unscaled ridge_pred of 0.1 sits inside any band with a negative
+# floor. So that check moved to where it belongs and works at any sign: the
+# SPREAD of the grades (see _check_scaled_spread). An unscaled bundle has every
+# |g| under 1; a display-scaled one cannot.
+PITCH_GRADE_BAND = (-100.0, 250.0)
+
+# avgVelo is the one number on the page in real units rather than on the display
+# scale, so the band is a units check, not a quality check. A mean RelSpeed that
+# lands outside this is a join that dropped rows, a NaN mean, or someone handing
+# it m/s (a 93 mph fastball reads 41.6). College arms sit roughly 68-98; the band
+# is wide enough that no real pitch aborts a publish and narrow enough that none
+# of those three failures survives it.
+VELO_BAND = (55.0, 110.0)
+
+# Per-type adjusted results spread far wider than the fastball season figure
+# DISPLAY_BAND was drawn for, and for a structural reason rather than a defect:
+# the fastball board averages over 100+ pitches per qualified pitcher, while a
+# pitch-type results number can rest on under 30. Measured on a real bundle the
+# range is 28.7 to 140.1 across types, with per-type medians a sane 74.7 to
+# 103.3, so DISPLAY_BAND would abort a publish over a legitimately bad changeup.
+# The band's real job here is the same as PITCH_GRADE_BAND's: catch a raw run
+# value (|v| < ~0.2) that never went through to_display. Anything above ~0.5
+# does that, and tightness beyond it only costs real publishes.
+ADJRES_BAND = (1.0, 250.0)
 
 
 def _check_display_band(value, band, *, key, field, ptype):
@@ -65,11 +193,53 @@ def _check_display_band(value, band, *, key, field, ptype):
         )
 
 
+def _check_velo(value, *, key, ptype):
+    """Raise if `value` is not a plausible average release speed in mph.
+
+    None is allowed and means the source extract carried no RelSpeed column; the
+    page renders the row without a velocity rather than inventing one. What is
+    not allowed is a present-but-wrong value. NaN is called out separately: a
+    mean over an all-null slice comes back NaN, which fails every comparison
+    silently and would otherwise reach the page as "NaN mph".
+    """
+    if value is None:
+        return
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise ValueError(f"{key} avgVelo for {ptype} is not numeric: {value!r}")
+    if value != value:
+        raise ValueError(f"{key} avgVelo for {ptype} is NaN; RelSpeed is missing for that slice")
+    low, high = VELO_BAND
+    if not low <= value <= high:
+        raise ValueError(
+            f"{key} avgVelo for {ptype} is {value}, outside the plausible "
+            f"{low:g}-{high:g} mph range; check units and the RelSpeed join"
+        )
+
+
+def _check_scaled_spread(values, *, key, field):
+    """Catch a bundle emitted on the raw ridge scale instead of 100+/-15.
+
+    This is the job PITCH_GRADE_BAND's positive floor used to do, moved off the
+    per-value bound so it keeps working now that a legitimate grade can be
+    negative. An unscaled ridge_pred is |v| < ~0.2 for every pitch, so the whole
+    series collapses near zero; a display-scaled series cannot, because the
+    transform centres it on 100. Checked on the maximum magnitude rather than
+    the mean so a single pitch is enough to prove the scale.
+    """
+    if not values:
+        return
+    if max(abs(v) for v in values) < 5.0:
+        raise ValueError(
+            f"{key} {field}: every value is under 5 in magnitude "
+            f"(max {max(abs(v) for v in values):.4f}); this is almost certainly "
+            f"the raw ridge scale, not the 100+/-15 display scale")
+
+
 def validate_pitcher_bundle(files: dict) -> None:
     """Fail loudly before upload. Mirrors validate_bundle's style: plain
     ValueErrors naming the offending file and key.
     """
-    for name in ("location_maps.json", "model_artifacts.json"):
+    for name in ("location_maps.json", "model_artifacts.json", "staff_by_type.json"):
         if name not in files:
             raise ValueError(f"pitcher bundle missing {name}")
 
@@ -91,6 +261,21 @@ def validate_pitcher_bundle(files: dict) -> None:
         if m["displaySd"] <= 0:
             raise ValueError(f"{tname} displaySd must be positive, got {m['displaySd']}")
 
+    for t in files["staff_by_type.json"]["types"]:
+        if not t["pitchers"]:
+            raise ValueError(f"staff_by_type has no pitchers for {t['type']}")
+        if t["type"] not in files["model_artifacts.json"]["byPitchType"]:
+            raise ValueError(f"staff_by_type has pitch type {t['type']!r} with no model artifact")
+        for r in t["pitchers"]:
+            _check_display_band(r["stuff"], DISPLAY_BAND, key="staff_by_type.json",
+                                field="staff Stuff+", ptype=t["type"])
+            # None is legitimate: a type can lack the qualifying pitchers needed
+            # to set a results scale. A present value still has to be on the
+            # display scale like every other score.
+            if r.get("adjRes") is not None:
+                _check_display_band(r["adjRes"], ADJRES_BAND, key="staff_by_type.json",
+                                    field="staff Adj Results", ptype=t["type"])
+
     pitcher_files = [k for k in files if k.startswith("pitchers/")]
     if not pitcher_files:
         raise ValueError("pitcher bundle has no pitcher files")
@@ -110,6 +295,75 @@ def validate_pitcher_bundle(files: dict) -> None:
                     raise ValueError(f"{key} is missing a numeric Location+ for its fastball")
                 _check_display_band(a["loc"], DISPLAY_BAND, key=key, field="fastball Location+", ptype=a["type"])
             _check_display_band(a["stuff"], DISPLAY_BAND, key=key, field="arsenal Stuff+", ptype=a["type"])
+            _check_velo(a["avgVelo"], key=key, ptype=a["type"])
+            if a.get("adjRes") is not None:
+                _check_display_band(a["adjRes"], ADJRES_BAND, key=key,
+                                    field="arsenal Adj Results", ptype=a["type"])
+            if a["type"] == "FF":
+                if not a["locWhere"]:
+                    raise ValueError(f"{key} fastball row has no Location+ decomposition")
+                total = sum(r["points"] for r in a["locWhere"])
+                if abs(total - (a["loc"] - 100.0)) > LOC_DECOMP_TOLERANCE:
+                    raise ValueError(
+                        f"{key} Location+ decomposition sums to {total:.2f} but the score is "
+                        f"{a['loc'] - 100.0:.2f} off 100; the rows do not explain the number "
+                        f"they sit under"
+                    )
+                for r in a["locWhere"]:
+                    missing = REQUIRED_LOC_WHERE_KEYS - set(r)
+                    if missing:
+                        raise ValueError(
+                            f"{key} Location+ row {r['region']!r} missing {missing}")
+                    if not 0.0 <= r["share"] <= 1.0 or not 0.0 <= r["leagueShare"] <= 1.0:
+                        raise ValueError(f"{key} Location+ row {r['region']!r} has a share outside 0-1")
+                    # Rows are collapsed to one per region (see arsenal.py); a
+                    # `count` key here would mean a bundle built before that
+                    # collapse, or a regression back to (region, count) rows.
+                    # The frontend's pooled-row detector keys on `count == "all"`
+                    # and would misread a region row carrying it as the pooled
+                    # catch-all, so this cannot be a soft warning.
+                    if "count" in r:
+                        raise ValueError(
+                            f"{key} Location+ row {r['region']!r} carries a `count` field; "
+                            f"rows are one per region now, with per-count frequency nested "
+                            f"under `byCount` instead"
+                        )
+                    for bc in r["byCount"]:
+                        bc_missing = REQUIRED_BY_COUNT_KEYS - set(bc)
+                        if bc_missing:
+                            raise ValueError(
+                                f"{key} Location+ row {r['region']!r} byCount entry missing {bc_missing}")
+                        if not 0.0 <= bc["share"] <= 1.0:
+                            raise ValueError(
+                                f"{key} Location+ row {r['region']!r} byCount[{bc['count']!r}] "
+                                f"has a share outside 0-1")
+                        if "leagueShare" in bc and not 0.0 <= bc["leagueShare"] <= 1.0:
+                            raise ValueError(
+                                f"{key} Location+ row {r['region']!r} byCount[{bc['count']!r}] "
+                                f"has a leagueShare outside 0-1")
+                if not isinstance(a["locBaseline"], (int, float)):
+                    raise ValueError(
+                        f"{key} fastball row has no numeric Location+ baseline; without it "
+                        f"the occupancy/placement split does not reach the score"
+                    )
+                # Occupancy + placement + the league's own mix IS the score, by
+                # construction. Anything else means a term was dropped or double
+                # counted, and the page would print columns that do not reach the
+                # number above them.
+                split = (sum(r["occupancyPoints"] for r in a["locWhere"])
+                         + sum(r["placementPoints"] for r in a["locWhere"])
+                         + a["locBaseline"])
+                if abs(split - (a["loc"] - 100.0)) > LOC_SPLIT_TOLERANCE:
+                    raise ValueError(
+                        f"{key} Location+ occupancy plus placement plus baseline is "
+                        f"{split:.9f} but the score is {a['loc'] - 100.0:.9f} off 100; "
+                        f"the split does not explain the number it sits under"
+                    )
+            elif a["locWhere"] is not None or a["locBaseline"] is not None:
+                raise ValueError(
+                    f"{key} emits a Location+ decomposition for {a['type']}; Location+ is a "
+                    f"fastball score only"
+                )
             if a["type"] not in model["byPitchType"]:
                 raise ValueError(
                     f"{key} arsenal has pitch type {a['type']!r} with no matching entry "
@@ -127,3 +381,14 @@ def validate_pitcher_bundle(files: dict) -> None:
             if len(p["f"]) != n_feats:
                 raise ValueError(f"{key} pitch feature array is {len(p['f'])}, expected {n_feats}")
             _check_display_band(p["g"], PITCH_GRADE_BAND, key=key, field="pitch grade (g)", ptype=p["t"])
+            for str_key in OPTIONAL_PITCH_STRING_KEYS:
+                if str_key not in p:
+                    continue
+                val = p[str_key]
+                if not isinstance(val, str) or not val.strip():
+                    raise ValueError(
+                        f"{key} pitch row has a present but blank/non-string "
+                        f"{str_key!r} field: {val!r}"
+                    )
+        _check_scaled_spread([p["g"] for p in body["pitches"] if p.get("g") is not None],
+                             key=key, field="pitch grade (g)")

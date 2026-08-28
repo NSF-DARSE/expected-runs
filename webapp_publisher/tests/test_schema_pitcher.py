@@ -16,6 +16,29 @@ GOOD = {
         "pitcherId": 1000123, "name": "Test-Pitcher, Alpha", "hand": "R", "season": 2026,
         "arsenal": [{"type": "FF", "label": "Fastball", "n": 412, "usage": 1.0,
                      "stuff": 124.0, "loc": 103.0, "recentChange": -6.2,
+                     "avgVelo": 93.1, "aboveFloor": True,
+                     # points sum to loc - 100, and occupancy + placement +
+                     # locBaseline reach the same 3.0 by the other route.
+                     # Rows are one per region; the count split lives only in
+                     # each row's byCount (frequency, no points -- see
+                     # arsenal.location_decomposition).
+                     "locWhere": [{"region": "Down and away", "n": 200,
+                                   "share": 0.5, "leagueShare": 0.3, "points": 3.0,
+                                   "occupancyPoints": 2.0, "placementPoints": 0.5,
+                                   "value": -0.01, "leagueValue": -0.005,
+                                   # leagueShare here is optional (see schema.py) --
+                                   # present on this row to cover the common case,
+                                   # while the other row below omits it to keep
+                                   # covering a bundle from before this field
+                                   # existed, or a bucket the league never lands in.
+                                   "byCount": [{"count": "ahead", "n": 200, "share": 1.0,
+                                                "leagueShare": 0.9}]},
+                                  {"region": "Up, middle", "n": 212,
+                                   "share": 0.5, "leagueShare": 0.4, "points": 0.0,
+                                   "occupancyPoints": 0.0, "placementPoints": 0.0,
+                                   "value": 0.0, "leagueValue": 0.0,
+                                   "byCount": [{"count": "even", "n": 212, "share": 1.0}]}],
+                     "locBaseline": 0.5,
                      "trend": {"stuff": {"recent": 121.0, "prior": 118.4, "delta": 2.6,
                                          "se": 1.9, "nRecent": 160, "nPrior": 140,
                                          "direction": "up"},
@@ -23,10 +46,18 @@ GOOD = {
                                         "se": 0.15, "nRecent": 160, "nPrior": 140,
                                         "direction": "up"},
                                "movAngle": None, "movMag": None},
-                     "aboveFloor": True, "typical": [2350.0], "percentiles": [78]}],
+                     "typical": [2350.0], "percentiles": [78]}],
         "outings": [{"date": "2026-03-15", "type": "FF", "n": 42, "stuff": 118.0}],
         "pitches": [{"d": "2026-03-15", "t": "FF", "x": -0.42, "z": 2.31,
                      "c": "0-2", "g": 131.0, "f": [2350.0]}],
+    },
+    "staff_by_type.json": {
+        "types": [
+            {"type": "FF", "label": "Fastball", "nQualified": 400, "sampleFloor": 100,
+             "pitchers": [{"pitcherId": 1000123, "name": "Test-Pitcher, Alpha",
+                          "hand": "R", "n": 412, "usage": 1.0, "stuff": 124.0,
+                          "avgVelo": 93.1, "aboveFloor": True}]},
+        ],
     },
 }
 
@@ -194,6 +225,48 @@ def test_arsenal_pitch_type_missing_from_model_artifacts_is_rejected():
         validate_pitcher_bundle(bad)
 
 
+def test_missing_average_velocity_is_rejected():
+    """avgVelo is required rather than optional. It is the pitch type's own
+    context line, so a row without it renders a pitch with no velocity beside it
+    and nothing anywhere says the field went missing.
+    """
+    bad = copy.deepcopy(GOOD)
+    del bad["pitchers/1000123.json"]["arsenal"][0]["avgVelo"]
+    with pytest.raises(ValueError, match="avgVelo"):
+        validate_pitcher_bundle(bad)
+
+
+def test_average_velocity_in_wrong_units_is_rejected():
+    """The failure this band exists for: RelSpeed arriving in m/s. A 93.1 mph
+    fastball reads 41.6, which is numeric, positive, and completely wrong on a
+    page a coach reads in mph.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["arsenal"][0]["avgVelo"] = 41.6
+    with pytest.raises(ValueError, match="mph"):
+        validate_pitcher_bundle(bad)
+
+
+def test_nan_average_velocity_is_rejected():
+    """A mean over an all-null RelSpeed slice is NaN, which passes every range
+    comparison by failing all of them, and would reach the page as "NaN mph".
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["arsenal"][0]["avgVelo"] = float("nan")
+    with pytest.raises(ValueError, match="NaN"):
+        validate_pitcher_bundle(bad)
+
+
+def test_average_velocity_across_the_real_college_range_is_accepted():
+    """The band is a units check, not a quality check. A soft changeup and a
+    plus fastball must both publish.
+    """
+    for velo in (68.0, 98.0):
+        good = copy.deepcopy(GOOD)
+        good["pitchers/1000123.json"]["arsenal"][0]["avgVelo"] = velo
+        validate_pitcher_bundle(good)  # must not raise
+
+
 def test_non_positive_display_sd_is_rejected():
     """A zero or negative display sd means the scale is degenerate; every score
     derived from it would be garbage or a division error.
@@ -201,4 +274,179 @@ def test_non_positive_display_sd_is_rejected():
     bad = copy.deepcopy(GOOD)
     bad["model_artifacts.json"]["byPitchType"]["FF"]["displaySd"] = 0.0
     with pytest.raises(ValueError, match="displaySd"):
+        validate_pitcher_bundle(bad)
+
+
+def test_type_board_entry_with_no_pitchers_is_rejected():
+    """An empty pitchers list for a type would render a staff board section with
+    nothing in it; the regroup upstream should never produce this, so a bundle
+    that has it is a build-time bug, not a legitimately quiet pitch type.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["staff_by_type.json"]["types"][0]["pitchers"] = []
+    with pytest.raises(ValueError, match="no pitchers for"):
+        validate_pitcher_bundle(bad)
+
+
+def test_type_board_entry_missing_from_model_artifacts_is_rejected():
+    """staff_by_type's per-type scale (nQualified, sampleFloor, displaySd) lives
+    in model_artifacts.json's byPitchType, keyed by the same type string. A type
+    on the board with no matching artifact would render the same broken defaults
+    the arsenal check above guards against: a sample floor of 0 and a tooltip
+    claiming "Fewer than 0 pitches this season".
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["staff_by_type.json"]["types"][0]["type"] = "SL"
+    with pytest.raises(ValueError, match="SL"):
+        validate_pitcher_bundle(bad)
+
+
+def test_unscaled_staff_stuff_value_is_rejected():
+    """Regression guard mirroring the arsenal `stuff` check: staff_by_type rows
+    carry the same 100+/-15 display Stuff+ and are just as exposed to a raw
+    expected-run value (~0.00x, lower = better) shipping unscaled onto the board.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["staff_by_type.json"]["types"][0]["pitchers"][0]["stuff"] = -0.0231
+    with pytest.raises(ValueError, match="Stuff"):
+        validate_pitcher_bundle(bad)
+
+
+def test_location_decomposition_that_does_not_sum_to_its_score_is_rejected():
+    """The rows are an exact split of the same mean, so a gap is a bug rather
+    than rounding: a mismatched population, a dropped cell, or a lost sign. The
+    page presents these as adding up, so a publish that does not add up must
+    not ship.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["arsenal"][0]["locWhere"][0]["points"] = 40.0
+    with pytest.raises(ValueError, match="do not explain the number"):
+        validate_pitcher_bundle(bad)
+
+
+def test_secondary_pitch_type_carrying_a_location_decomposition_is_rejected():
+    """Same construct leak the `loc` check catches, one level down: a slider has
+    no Location+, so it cannot have a breakdown of one either.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["arsenal"][0]["type"] = "Slider"
+    bad["pitchers/1000123.json"]["arsenal"][0]["loc"] = None
+    bad["model_artifacts.json"]["byPitchType"]["Slider"] =         copy.deepcopy(bad["model_artifacts.json"]["byPitchType"]["FF"])
+    bad["staff_by_type.json"]["types"][0]["type"] = "Slider"
+    with pytest.raises(ValueError, match="fastball score only"):
+        validate_pitcher_bundle(bad)
+
+
+def test_a_bad_but_real_adjusted_results_value_still_publishes():
+    """Measured on a real bundle, per-type adjusted results run 28.7 to 140.1:
+    the number can rest on under 30 pitches where the fastball board rests on
+    100+, so it spreads much wider. DISPLAY_BAND rejected a legitimate changeup
+    and aborted a whole publish, which is the failure this pins.
+    """
+    good = copy.deepcopy(GOOD)
+    good["staff_by_type.json"]["types"][0]["pitchers"][0]["adjRes"] = 28.7
+    validate_pitcher_bundle(good)  # must not raise
+
+
+def test_an_unscaled_adjusted_results_value_is_still_rejected():
+    """Widening the band must not give up what the band is for: a raw run value
+    (|v| < ~0.2) that never went through to_display.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["staff_by_type.json"]["types"][0]["pitchers"][0]["adjRes"] = -0.031
+    with pytest.raises(ValueError, match="Adj Results"):
+        validate_pitcher_bundle(bad)
+
+
+def test_occupancy_plus_placement_plus_baseline_that_misses_the_score_is_rejected():
+    """The page prints occupancy and placement as separate columns under the
+    score, so the three terms have to reach it. `points` summing correctly is not
+    enough: the split is a different arrangement of the same algebra and can be
+    wrong on its own.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["arsenal"][0]["locWhere"][0]["occupancyPoints"] = 9.0
+    with pytest.raises(ValueError, match="does not explain the number"):
+        validate_pitcher_bundle(bad)
+
+
+def test_fastball_decomposition_without_a_baseline_is_rejected():
+    """The baseline is not recoverable from the rows, so a bundle missing it
+    leaves the two columns short of the score with nothing to name the gap.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["arsenal"][0]["locBaseline"] = None
+    with pytest.raises(ValueError, match=r"no numeric Location\+ baseline"):
+        validate_pitcher_bundle(bad)
+
+
+def test_location_row_missing_a_split_column_is_rejected():
+    """A bundle published before the split existed still validates its `points`,
+    so the per-row key check is the only thing that catches it.
+    """
+    bad = copy.deepcopy(GOOD)
+    del bad["pitchers/1000123.json"]["arsenal"][0]["locWhere"][0]["placementPoints"]
+    with pytest.raises(ValueError, match="missing"):
+        validate_pitcher_bundle(bad)
+
+
+def test_byCount_without_leagueShare_still_validates():
+    """leagueShare is optional on a byCount entry: a bundle built between the
+    region-collapse and this change, and a fresh bundle's bucket the league
+    never lands in, both look like this -- REQUIRED_BY_COUNT_KEYS must not
+    grow to include it.
+    """
+    good = copy.deepcopy(GOOD)
+    assert "leagueShare" not in good["pitchers/1000123.json"]["arsenal"][0]["locWhere"][1]["byCount"][0]
+    validate_pitcher_bundle(good)
+
+
+def test_byCount_leagueShare_outside_0_1_is_rejected():
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["arsenal"][0]["locWhere"][0]["byCount"][0]["leagueShare"] = 1.4
+    with pytest.raises(ValueError, match="leagueShare outside 0-1"):
+        validate_pitcher_bundle(bad)
+
+
+def test_pitch_row_result_and_batter_are_optional_and_pass_when_present():
+    """A coach placing a pitch from memory needs `r` (result label) and `b`
+    (batter name) on the per-pitch record; both are optional and a bundle
+    carrying real values for them must still validate.
+    """
+    good = copy.deepcopy(GOOD)
+    good["pitchers/1000123.json"]["pitches"][0]["r"] = "Called strike"
+    good["pitchers/1000123.json"]["pitches"][0]["b"] = "Smith, John"
+    validate_pitcher_bundle(good)  # must not raise
+
+
+def test_pitch_row_without_result_or_batter_still_validates():
+    """Bullpen/practice-shaped rows carry neither field at all; GOOD already
+    omits both, so this pins that omission is accepted, not merely untested.
+    """
+    assert "r" not in GOOD["pitchers/1000123.json"]["pitches"][0]
+    assert "b" not in GOOD["pitchers/1000123.json"]["pitches"][0]
+    validate_pitcher_bundle(copy.deepcopy(GOOD))
+
+
+def test_pitch_row_with_empty_result_is_rejected():
+    """A present-but-blank `r` means the upstream omit-when-absent logic failed
+    and shipped a placeholder a coach could mistake for a real call.
+    """
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["pitches"][0]["r"] = "   "
+    with pytest.raises(ValueError, match="'r'"):
+        validate_pitcher_bundle(bad)
+
+
+def test_pitch_row_with_empty_batter_is_rejected():
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["pitches"][0]["b"] = ""
+    with pytest.raises(ValueError, match="'b'"):
+        validate_pitcher_bundle(bad)
+
+
+def test_pitch_row_with_non_string_result_is_rejected():
+    bad = copy.deepcopy(GOOD)
+    bad["pitchers/1000123.json"]["pitches"][0]["r"] = 7
+    with pytest.raises(ValueError, match="'r'"):
         validate_pitcher_bundle(bad)

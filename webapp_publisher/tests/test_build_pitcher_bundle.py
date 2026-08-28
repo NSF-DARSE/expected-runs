@@ -2,7 +2,7 @@ import copy
 
 import pytest
 
-from webapp_publisher.build_pitcher_bundle import build_pitcher_bundle, pitcher_index
+from webapp_publisher.build_pitcher_bundle import build_pitcher_bundle, build_type_board, pitcher_index
 
 PAGES = {
     "team": "DEL_BLU",
@@ -16,7 +16,7 @@ PAGES = {
     "pitchers": [{
         "pitcherId": 1000123, "name": "Test-Pitcher, Alpha", "hand": "R",
         "arsenal": [{"type": "FF", "n": 412, "usage": 1.0, "stuff": 124.0,
-                     "loc": 103.0, "recentChange": -6.2,
+                     "loc": 103.0, "recentChange": -6.2, "avgVelo": 93.1,
                      "trend": {"stuff": None, "velo": {"recent": 92.1, "prior": 91.4,
                                                        "delta": 0.7, "se": 0.15,
                                                        "nRecent": 160, "nPrior": 140,
@@ -34,7 +34,7 @@ PAGES = {
 def test_bundle_has_one_file_per_pitcher_plus_the_shared_files():
     out = build_pitcher_bundle(PAGES)
     assert set(out) == {"location_maps.json", "model_artifacts.json",
-                        "pitchers/1000123.json"}
+                        "pitchers/1000123.json", "staff_by_type.json"}
 
 
 def test_pitcher_file_is_keyed_by_trackman_id_not_a_positional_index():
@@ -48,6 +48,9 @@ def test_pitcher_file_is_keyed_by_trackman_id_not_a_positional_index():
 def test_pitcher_file_carries_arsenal_outings_and_pitches():
     body = build_pitcher_bundle(PAGES)["pitchers/1000123.json"]
     assert body["arsenal"][0]["stuff"] == 124.0
+    # The publisher only relabels arsenal rows; anything the page builder emits
+    # has to survive that passthrough, and avgVelo is the first field added since.
+    assert body["arsenal"][0]["avgVelo"] == 93.1
     assert body["outings"][0]["date"] == "2026-03-15"
     assert body["pitches"][0]["g"] == 131.0
 
@@ -112,6 +115,78 @@ def test_stamp_leaves_none_when_no_pitcher_file():
     assert rows["Test-Pitcher, Charlie"] is None
 
 
+def test_type_board_regroups_arsenal_rows_by_pitch_type():
+    """build_type_board pivots the pitcher pages from by-pitcher to by-type with
+    no new modeling, so the arsenal row a pitcher already has for a pitch type
+    must show up unchanged under that type's entry, and every pitch type present
+    in the arsenal must produce its own board section.
+    """
+    board = build_type_board(PAGES)
+    assert [t["type"] for t in board["types"]] == ["FF"]
+    ff_pitchers = board["types"][0]["pitchers"]
+    assert [p["pitcherId"] for p in ff_pitchers] == [1000123]
+    assert ff_pitchers[0]["stuff"] == 124.0
+
+
+from webapp_publisher.build_pitcher_bundle import enrich_stuff_attr_detail
+
+
+def _detail_pages():
+    return {
+        "model": {"featureOrder": ["SpinRate", "EffectiveVelo"]},
+        "pitchers": [{
+            "pitcherId": 1000101, "name": "Test-Pitcher, Alpha", "hand": "R",
+            "arsenal": [{"type": "FF", "typical": [2350.0, 91.2], "percentiles": [78, 55]}],
+        }],
+    }
+
+
+def _detail_bundle(names, pitcher_id):
+    return {"staff_board.json": {"pitchers": [{
+        "name": "Test-Pitcher, Alpha", "pitcherId": pitcher_id,
+        "stuffAttr": [(n, 1.0) for n in names],
+        "stuffAttrNoHand": [(n, 1.0) for n in names],
+    }]}}
+
+
+def test_enrich_matches_feature_names_case_insensitively():
+    """08_staff_scores lowercases every stuffAttr name (effectivevelo) while
+    model.featureOrder keeps canonical casing (EffectiveVelo); a case-sensitive
+    join would null out every real trait on the board.
+    """
+    bundle = _detail_bundle(["spinrate", "effectivevelo"], pitcher_id=1000101)
+    enrich_stuff_attr_detail(bundle, _detail_pages())
+    detail = bundle["staff_board.json"]["pitchers"][0]["stuffAttrDetail"]
+    assert detail["spinrate"] == {"value": 2350.0, "percentile": 78}
+    assert detail["effectivevelo"] == {"value": 91.2, "percentile": 55}
+
+
+def test_enrich_leaves_value_and_percentile_null_for_an_unmatched_feature(capsys):
+    """A stuffAttr name that matches nothing in model.featureOrder, even after
+    lowercasing, is a real naming drift between the two upstream scripts. The
+    points already shipped from 08_staff_scores must not be dropped or guessed
+    at, so the row keeps them with a null value/percentile, and a message is
+    printed so the drift does not go unnoticed.
+    """
+    bundle = _detail_bundle(["spinrate", "not_a_real_feature"], pitcher_id=1000101)
+    enrich_stuff_attr_detail(bundle, _detail_pages())
+    detail = bundle["staff_board.json"]["pitchers"][0]["stuffAttrDetail"]
+    assert detail["not_a_real_feature"] == {"value": None, "percentile": None}
+    assert detail["spinrate"] == {"value": 2350.0, "percentile": 78}
+    assert "not_a_real_feature" in capsys.readouterr().out
+
+
+def test_enrich_leaves_everything_null_when_the_row_has_no_pitcher_file():
+    """A board row with no matching pitcher file (stamp_pitcher_ids leaves
+    pitcherId None) must still validate and ship; the trait rows just carry no
+    value or percentile.
+    """
+    bundle = _detail_bundle(["spinrate"], pitcher_id=None)
+    enrich_stuff_attr_detail(bundle, _detail_pages())
+    detail = bundle["staff_board.json"]["pitchers"][0]["stuffAttrDetail"]
+    assert detail["spinrate"] == {"value": None, "percentile": None}
+
+
 def test_stamp_rejects_duplicate_names():
     # Two pitcher files claiming one board name means the name join is unsafe and
     # a coach could be routed to the wrong player. Fail loudly rather than pick one.
@@ -119,3 +194,68 @@ def test_stamp_rejects_duplicate_names():
                           {"pitcherId": 1000199, "name": "Test-Pitcher, Alpha", "hand": "L"}]}
     with pytest.raises(ValueError, match="more than one pitcher file"):
         stamp_pitcher_ids(_bundle(["Test-Pitcher, Alpha"]), pages)
+
+
+from webapp_publisher.build_pitcher_bundle import enrich_loc_where
+
+
+def _where_rows():
+    return [{"region": "Down and away", "n": 41, "share": 0.31,
+             "leagueShare": 0.18, "points": 14.0, "occupancyPoints": 9.0,
+             "placementPoints": 4.5, "value": -0.004, "leagueValue": -0.002,
+             "byCount": [{"count": "ahead", "n": 41, "share": 1.0}]}]
+
+
+def _where_pages(arsenal):
+    return {"pitchers": [{"pitcherId": 1000101, "name": "Test-Pitcher, Alpha",
+                          "hand": "R", "arsenal": arsenal}]}
+
+
+def _where_bundle(pitcher_id=1000101):
+    return {"staff_board.json": {"pitchers": [
+        {"name": "Test-Pitcher, Alpha", "pitcherId": pitcher_id}]}}
+
+
+def test_loc_where_is_copied_whole_from_the_fastball_row():
+    """The board card shows a few rows plus a remainder, so it needs every row,
+    not a pre-truncated top slice: a card that lists four rows and no remainder
+    silently disagrees with the score printed beside it.
+    """
+    bundle = _where_bundle()
+    enrich_loc_where(bundle, _where_pages([{"type": "FF", "locWhere": _where_rows()}]))
+    assert bundle["staff_board.json"]["pitchers"][0]["locWhere"] == _where_rows()
+
+
+def test_loc_where_is_absent_rather_than_null_when_there_is_nothing_to_attach():
+    """Absent lets the card fall back to its descriptive lines. A null or an
+    empty list would render as a breakdown with no rows in it.
+    """
+    for arsenal in ([{"type": "SL", "locWhere": None}], [{"type": "FF", "locWhere": None}], []):
+        bundle = _where_bundle()
+        enrich_loc_where(bundle, _where_pages(arsenal))
+        assert "locWhere" not in bundle["staff_board.json"]["pitchers"][0]
+
+
+def test_loc_where_skips_a_row_with_no_pitcher_file():
+    bundle = _where_bundle(pitcher_id=None)
+    enrich_loc_where(bundle, _where_pages([{"type": "FF", "locWhere": _where_rows()}]))
+    assert "locWhere" not in bundle["staff_board.json"]["pitchers"][0]
+
+
+def test_loc_baseline_rides_along_with_the_rows():
+    """The board card cannot reach the score from the rows alone: the league's
+    own location mix is a term of the split that no row carries.
+    """
+    bundle = _where_bundle()
+    enrich_loc_where(bundle, _where_pages(
+        [{"type": "FF", "locWhere": _where_rows(), "locBaseline": -1.25}]))
+    assert bundle["staff_board.json"]["pitchers"][0]["locBaseline"] == -1.25
+
+
+def test_loc_baseline_is_absent_when_the_bundle_predates_it():
+    """Older pitcher pages have rows and no baseline. Absent rather than null so
+    the card can fall back instead of rendering a broken sum.
+    """
+    bundle = _where_bundle()
+    enrich_loc_where(bundle, _where_pages([{"type": "FF", "locWhere": _where_rows()}]))
+    assert "locBaseline" not in bundle["staff_board.json"]["pitchers"][0]

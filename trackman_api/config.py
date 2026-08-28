@@ -13,8 +13,20 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # .env lives at the repo root (one level up from this file's package dir).
+# In a git worktree the package sits under <main checkout>/.claude/worktrees/<name>/,
+# which has no .env of its own, so fall back to the nearest ancestor that has one.
 REPO_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(REPO_ROOT / ".env")
+
+
+def _find_env(start: Path) -> Path:
+    for candidate in (start, *start.parents):
+        env = candidate / ".env"
+        if env.is_file():
+            return env
+    return start / ".env"
+
+
+load_dotenv(_find_env(REPO_ROOT))
 
 # Production endpoints. Token URL is the client_credentials authority declared
 # in trackman_api/swagger.json (login.trackman.com -- NOT login.trackmanbaseball.com,

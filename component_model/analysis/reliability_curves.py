@@ -242,9 +242,25 @@ def reliability_curve(n, ceiling, persistence_x, share_y, noise_per_pitch, sig_v
 
 
 def optimal_blend(tab, metric_cols, target_col, noises, n, pitcher_col="pitcher",
-                   season_col="season", n_col="n"):
+                   season_col="season", n_col="n", signal_vars=None):
     """Precision-weighted (GLS) blend of metric_cols predicting target_col next
     season, at pitch count n. Returns (weights dict, R^2).
+
+    signal_vars: optional {metric_col: D_i} overriding the internally computed
+    signal_variance for Sigma's diagonal. Omit it and behaviour is exactly as
+    before. It exists because signal_variance is a DIFFERENCE of two estimated
+    quantities (observed variance minus the noise term), and for a metric whose
+    observed variance is mostly noise -- adjT season means are 77-90% noise at
+    real college pitch counts -- that difference can land BELOW the metric's own
+    stable component, i.e. an implied negative drift. That is out of bounds: D_i
+    is s2_stable + s2_drift and drift cannot be negative, so D_i < s2_stable is
+    impossible in truth. Left uncorrected it puts a diagonal smaller than its own
+    numerator Cov(a_i, a_y) ~ s2_stable, which inflates that metric's weight at
+    high n rather than shrinking it -- the opposite of conservative. Callers that
+    hit the boundary should pass max(signal_variance, s2_stable) here and RECORD
+    that they clamped (see variance_components.variance_components, which returns
+    drift raw precisely so the clamp is a visible caller decision and never a
+    silent one).
 
     Each metric this season is Z_i(n) = a_i + b_i,t + e_i(n). The target next
     season is Y = a_y + b_y,t+1 + e_y (fixed n_y, not varied here). Standard
@@ -274,7 +290,9 @@ def optimal_blend(tab, metric_cols, target_col, noises, n, pitcher_col="pitcher"
     var_y = centered_variance(tab, target_col, season_col)
 
     for i, mi in enumerate(metric_cols):
-        Sigma[i, i] = signal_variance(tab, mi, noises[mi], n_col) + noises[mi] / n
+        d_i = (signal_variance(tab, mi, noises[mi], n_col) if signal_vars is None
+               else float(signal_vars[mi]))
+        Sigma[i, i] = d_i + noises[mi] / n
         cov_iy, _ = pooled_cross_covariance(tab, mi, target_col, pitcher_col, season_col)
         c[i] = cov_iy
         for j in range(i + 1, k):

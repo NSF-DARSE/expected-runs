@@ -223,6 +223,20 @@ def add_calculated_features(df):
         how="left"
     )
 
+    # KNOWN BAD ANCHOR -- these three columns are OVERRIDDEN downstream. Do not build a new
+    # model on them as they come out of this file. `FastestPitchType` above is the tag holding
+    # the pitcher's SINGLE fastest pitch, which fails two ways (measured on 2026 D1,
+    # 2026-08-17): it is tag-scoped, so the 2436 of 5714 pitchers who spread fastballs across
+    # "Fastball" and "FourSeamFastBall" have one radar reading pick their anchor and 409 land
+    # on the minority tag; and a max over noisy readings let 693 pitchers anchor on a
+    # non-fastball, including 11 changeups and 8 sliders.
+    #
+    # fair_criterion.add_fastball_diffs is the authority and recomputes all three at load,
+    # pooling every FF_TYPES tag into one per-pitcher-year fastball group. It is deliberately
+    # NOT duplicated here: this file's output is a ~2GB CSV that would have to be regenerated
+    # from the per-game extracts for a change here to reach anything, and two copies of the
+    # same anchor rule in packages that cannot import each other will drift. Left in place so
+    # the CSV schema is unchanged; fix it here only if the CSV is being rebuilt anyway.
     df_merged["vertbreakdiff"] = df_merged["InducedVertBreak"] - df_merged["Avg_InducedVertBreak_FastestType"]
     df_merged["horzbreakdiff"] = df_merged["HorzBreak"] - df_merged["Avg_HorzBreak_FastestType"]
     df_merged["velocity_differential"] = df_merged["RelSpeed"] - df_merged["Avg_RelSpeed_FastestType"]

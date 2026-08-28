@@ -1,9 +1,12 @@
 """Why does Stuff+ predict sinkers worse than last season's results does?
 
-The shape of the failure rules out the boring explanation. If the sinker criterion were simply
-noisy, NOTHING would predict it, results included. Results predicts it at +0.24 while our
-physics predicts it at +0.08, so sinker outcomes carry persistent skill our features cannot
-see. Four candidate explanations, cheapest first.
+RESOLVED (2026-08-28, see docs/notes/sinker-cutter-loop-ledger.md, task zero). An earlier
+version of this docstring argued the criterion "can't be noise" because results predict it at
++0.24 while our physics predicts +0.08 — that argument mixed year pairs. The +0.24 is the
+2025->2026 gate-panel reliability; this script's panel is 2024->2025, where SI criterion
+reliability is ~0 at low floors (small-sample attenuation plus thinner 2024 coverage) and
++0.25 at floor>=40. Both published numbers are right on their own definitions. The four
+candidate explanations below were still worth measuring, cheapest first:
 
   (1) RELIABILITY CEILING. Year-over-year correlation of the grade and of the criterion, per
       pitch type. Validity cannot exceed what the criterion's own reliability allows, so this

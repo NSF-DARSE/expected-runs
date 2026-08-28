@@ -317,6 +317,7 @@ def load_pitches(args):
         print(f"*** CACHE REBUILD: {cache} predates {', '.join(stale)} ***")
     df = pd.read_csv(args.data, usecols=available)
     df = df.dropna(subset=["PitchUID"]).drop_duplicates(subset="PitchUID", keep="first")
+    normalize_pitcher_names(df)
     df["year"] = pd.to_datetime(df["Date"], errors="coerce").dt.year
     df = df[df["year"].isin(pair)].copy()
     df["year"] = df["year"].astype(int)
@@ -337,6 +338,19 @@ def load_pitches(args):
     check_feature_coverage(df, pair)
     df = add_fastball_diffs(df)
     df.to_parquet(cache, index=False)
+    return df
+
+
+def normalize_pitcher_names(df):
+    """Collapse whitespace defects in the Pitcher display string, in place.
+
+    TrackMan carries variants like "Test-Pitcher , Alpha" alongside
+    "Test-Pitcher, Alpha" for one pitcher (17 such names in the 2024 season).
+    PitcherId is consistent across the variants, so grouping is unaffected --
+    this is display hygiene, normalized once at the source.
+    """
+    df["Pitcher"] = (df["Pitcher"].str.replace(r"\s+,", ",", regex=True)
+                     .str.replace(r"\s+", " ", regex=True).str.strip())
     return df
 
 

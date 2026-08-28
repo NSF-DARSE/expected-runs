@@ -154,6 +154,8 @@ def test_dry_run_writes_nested_bundle_keys(tmp_path, monkeypatch):
             "pitcherId": 1000123, "name": "Test-Pitcher, Alpha", "hand": "R",
             "arsenal": [{"type": "FF", "n": 412, "usage": 1.0, "stuff": 124.0,
                          "loc": 103.0, "recentChange": -6.2, "avgVelo": 93.1,
+                         "trend": {"stuff": None, "velo": None,
+                                   "movAngle": None, "movMag": None},
                          "aboveFloor": True,
                          "locWhere": [{"region": "Down and away", "n": 412,
                                        "share": 1.0, "leagueShare": 0.3, "points": 3.0,

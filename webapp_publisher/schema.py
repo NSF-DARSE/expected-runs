@@ -78,7 +78,7 @@ def validate_bundle(bundle: dict) -> None:
 
 
 REQUIRED_ARSENAL_KEYS = {"type", "label", "n", "usage", "stuff", "loc",
-                         "recentChange", "avgVelo", "locWhere", "locBaseline",
+                         "recentChange", "trend", "avgVelo", "locWhere", "locBaseline",
                          "aboveFloor", "typical", "percentiles"}
 
 # How far the location decomposition may drift from the score it explains before

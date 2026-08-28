@@ -103,18 +103,3 @@ def build_gamestate_summary_all_years(data_root, save_path):
 
 
 if __name__ == "__main__":
-    # Arguments rather than hardcoded paths: this runs on whatever machine does
-    # the refresh, and the previous literals pointed at a collaborator's laptop,
-    # which meant nobody else could regenerate the table the whole pipeline
-    # depends on.
-    import argparse
-
-    ap = argparse.ArgumentParser(description="Build the run-expectancy summary from a raw game tree.")
-    ap.add_argument("--data-root", required=True, help="Root holding YYYY/MM/DD/CSV game files")
-    ap.add_argument("--out-dir", required=True, help="Directory to write the summary into")
-    _args = ap.parse_args()
-    data_root = _args.data_root
-    save_path = _args.out_dir
-
-    summary_df = build_gamestate_summary_all_years(data_root, save_path)
-    print(summary_df.head())

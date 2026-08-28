@@ -115,7 +115,89 @@ DEV_CENTRES = {
     "dev_relside": {0: 1.6516521778868811, 1: 1.807404618575344},
 }
 DEV_SRC = {"dev_relheight": "RelHeight", "dev_relside": "RelSide_arm"}
-FF_TYPES = {"Fastball", "FourSeamFastBall", "FourSeamFastball"}
+# "FastBall" and "Four-Seam" added 2026-08-17: both appear as TrackMan tags in the D1
+# extracts and were previously unrecognised, so those pitches were not counted as fastballs
+# at all -- neither for the is_ff model filter nor for the differential anchor below.
+FF_TYPES = {"Fastball", "FourSeamFastBall", "FourSeamFastball", "FastBall", "Four-Seam"}
+
+# ---- the "vs primary fastball" anchor, recomputed at load (see add_fastball_diffs) ----
+# Source column -> the differential column it feeds.
+DIFF_COLS = {"InducedVertBreak": "vertbreakdiff", "HorzBreak": "horzbreakdiff",
+             "RelSpeed": "velocity_differential"}
+# A fallback anchor group must clear this many pitches before it can win on mean velocity,
+# so a single mis-tagged 95mph "changeup" cannot become a pitcher's reference pitch.
+ANCHOR_MIN_N = 5
+# Columns written by add_fastball_diffs. Their presence is the cache-freshness marker: a
+# parquet written before this function existed carries the OLD differentials under the same
+# three names, and the column-presence check alone would happily serve them.
+ANCHOR_COLS = ["anchor_type", "anchor_n"]
+
+# ---------------- per-pitch-type models ----------------
+# One model per pitch type, because the same measurement means different things on different
+# pitches. Added 2026-08-17 after the coaching staff walked the four-seam page; every entry
+# below traces to a decision recorded there, not to a search over feature sets.
+#
+# GROUPS pool the TrackMan tags that are one pitch for modelling purposes. Display naming is
+# NOT changed by this: the dashboard still shows a pitcher the tag he was thrown.
+PITCH_GROUPS = {
+    "FF": set(FF_TYPES),
+    # A sinker and a two-seam are the same pitch under two names.
+    "SI": {"Sinker", "TwoSeamFastBall"},
+    "SL": {"Slider"},
+    "SW": {"Sweeper"},
+    "CB": {"Curveball"},
+    "FC": {"Cutter"},
+    # Splitter is pooled with ChangeUp for TRAINING ONLY. Measured 2026-08-17 on D1: for the
+    # 174 pitcher-seasons carrying both tags at 15+ each, the two are the same pitch for that
+    # pitcher (velo apart 0.22 mph, IVB 0.83 in, HorzBreak 0.23 in -- 0.07, 0.18 and 0.02 of
+    # the between-pitcher SD; mean Target +0.0032 vs +0.0033; which tag is slower flips 58/42).
+    # Splitter alone has ZERO pitchers at 100+ in both seasons, so the alternative to pooling
+    # is not a splitter model, it is no splitter grade at all. Dan has not yet ruled on the
+    # taxonomy; if he separates them, delete "Splitter" here and splitters go ungraded until
+    # the sample exists.
+    "CH": {"ChangeUp", "Splitter"},
+}
+
+# The physical inputs every pitch type gets. This IS the shipped four-seam list (see the FEATS
+# note above); FEATS stays bound to it so existing callers keep working unchanged.
+BASE_FEATS = list(FEATS)
+# "versus his own primary fastball" -- only meaningful for a pitch trying to look like the
+# fastball and behave differently. Anchored by add_fastball_diffs.
+DIFF_FEATS = ["vertbreakdiff", "horzbreakdiff", "velocity_differential"]
+
+FEATS_BY_PITCH = {
+    # No differentials: a four-seam IS the anchor, so its own differentials are ~0 by
+    # construction, and they were dropped for interpretability in 114cae5.
+    "FF": BASE_FEATS,
+    # No differentials either, per Jack 2026-08-17: a sinker is a fastball, you want both
+    # hard, and "slower than your fastball" is not a virtue you would coach into one. It
+    # still gets its OWN model, because release height is expected to invert against the
+    # four-seam -- a low slot means flat-to-the-top on a four-seam and steep-to-the-bottom
+    # on a sinker, both good, for opposite reasons.
+    "SI": BASE_FEATS,
+    "SL": BASE_FEATS + DIFF_FEATS,
+    "SW": BASE_FEATS + DIFF_FEATS,
+    "CB": BASE_FEATS + DIFF_FEATS,
+    "FC": BASE_FEATS + DIFF_FEATS,
+    # SpinRate removed on Dan's reading, 2026-08-17: the term carries the wrong sign, and it
+    # rewards high spin because spin correlates with break while the speed differential
+    # already carries the mechanism. He wants LOW spin on a cambio. Keeping a feature that is
+    # confidently backwards is worse than dropping a feature that is merely weak.
+    "CH": [f for f in BASE_FEATS if f != "SpinRate"] + DIFF_FEATS,
+}
+
+
+def pitch_mask(df, group):
+    """Rows of one PITCH_GROUPS key. Raises on an unknown key rather than silently empty."""
+    if group not in PITCH_GROUPS:
+        raise KeyError(f"unknown pitch group {group!r}; have {sorted(PITCH_GROUPS)}")
+    return df["TaggedPitchType"].isin(PITCH_GROUPS[group])
+
+
+def feats_for(group):
+    if group not in FEATS_BY_PITCH:
+        raise KeyError(f"no feature set for {group!r}; have {sorted(FEATS_BY_PITCH)}")
+    return list(FEATS_BY_PITCH[group])
 USECOLS = ["PitchUID", "Date", "Pitcher", "PitcherId", "PitcherThrows", "PitcherTeam",
            "Batter", "BatterSide", "BatterTeam", "Balls", "Strikes",
            "TaggedPitchType", "PitchCall", "TaggedHitType", "ExitSpeed", "Angle",
@@ -213,6 +295,43 @@ def paths():
     return args
 
 
+def workdirs():
+    """(data_csv, score_workdir, crit_workdir) from the environment.
+
+    The multi-frame scripts need TWO workdirs at once -- one holding the build a pitcher is
+    GRADED from and one holding the build he is MEASURED against -- which paths() cannot
+    express, since it resolves a single --workdir. Reading them here keeps local absolute
+    paths out of the scripts and therefore out of this public repository; every caller fails
+    loudly on a missing variable rather than defaulting to someone else's machine.
+    """
+    data = os.environ.get("STUFFPLUS_DATA")
+    score = os.environ.get("STUFFPLUS_WORKDIR")
+    crit = os.environ.get("STUFFPLUS_WORKDIR_CRIT")
+    missing = [n for n, v in (("STUFFPLUS_DATA", data), ("STUFFPLUS_WORKDIR", score),
+                              ("STUFFPLUS_WORKDIR_CRIT", crit)) if not v]
+    if missing:
+        sys.exit("set " + ", ".join(missing) + " (source CSV, score-build workdir, "
+                 "criterion-build workdir; both workdirs must live outside the repo)")
+    return data, score, crit
+
+
+def load_frame(data, workdir, years, level="D1"):
+    """One fully-built frame: pitches + xT + adjT, for the given real year pair.
+
+    The pair is role-relabeled to 2024/2025 inside load_pitches, so callers always filter on
+    those labels regardless of which seasons they asked for.
+    """
+    saved = sys.argv
+    sys.argv = ["x", "--data", data, "--workdir", workdir, "--years", years,
+                "--level", level]
+    args = paths()
+    sys.argv = saved
+    df = load_pitches(args)
+    add_xt(df)
+    add_adjusted(df)
+    return df
+
+
 def _year_suffix(args):
     pair = getattr(args, "year_pair", (2024, 2025))
     tag = "" if pair == (2024, 2025) else f"_{pair[0]}_{pair[1]}"
@@ -241,11 +360,19 @@ def load_pitches(args):
     if os.path.exists(cache):
         cached = pd.read_parquet(cache)
         stale = [c for c in available if c not in cached.columns]
+        # ANCHOR_COLS are the freshness marker for the recomputed differentials. Without this
+        # a pre-2026-08-17 cache passes the column check and silently serves the OLD
+        # single-fastest-pitch anchor under the same three column names.
+        stale += [c for c in ANCHOR_COLS if c not in cached.columns]
         if not stale:
+            # Re-checked on the cached frame too: a cache written before this
+            # guard existed can carry the same season-wide gap.
+            check_feature_coverage(cached, pair)
             return cached
         print(f"*** CACHE REBUILD: {cache} predates {', '.join(stale)} ***")
     df = pd.read_csv(args.data, usecols=available)
     df = df.dropna(subset=["PitchUID"]).drop_duplicates(subset="PitchUID", keep="first")
+    normalize_pitcher_names(df)
     df["year"] = pd.to_datetime(df["Date"], errors="coerce").dt.year
     df = df[df["year"].isin(pair)].copy()
     df["year"] = df["year"].astype(int)
@@ -263,7 +390,117 @@ def load_pitches(args):
     df["is_lhb"] = (df["BatterSide"] == "Left").astype(float)
     df["is_inplay"] = df["PitchCall"] == "InPlay"
     df["is_ff"] = df["TaggedPitchType"].isin(FF_TYPES)
+    check_feature_coverage(df, pair)
+    df = add_fastball_diffs(df)
     df.to_parquet(cache, index=False)
+    return df
+
+
+def normalize_pitcher_names(df):
+    """Collapse whitespace defects in the Pitcher display string, in place.
+
+    TrackMan carries variants like "Test-Pitcher , Alpha" alongside
+    "Test-Pitcher, Alpha" for one pitcher (17 such names in the 2024 season).
+    PitcherId is consistent across the variants, so grouping is unaffected --
+    this is display hygiene, normalized once at the source.
+    """
+    df["Pitcher"] = (df["Pitcher"].str.replace(r"\s+,", ",", regex=True)
+                     .str.replace(r"\s+", " ", regex=True).str.strip())
+    return df
+
+
+def check_feature_coverage(df, pair):
+    """Refuse an extract whose model features are missing for a whole season.
+
+    The failure this catches: an extract that carries a FEATS column (so the
+    column check passes) but populated it for only ONE of the two seasons.
+    source_2025_2026_relspeed.csv is the live example -- RelSpeed was pulled
+    for the 2026 season only -- and without this guard the symptom is a
+    StandardScaler "0 sample(s)" error per pitch type, three scripts
+    downstream of the cause: every training-year row drops when the features
+    dropna. A column absent entirely still loads fine (OPTIONAL_COLS) and
+    fails on the KeyError in stuff_ridge as before; this guard is for the
+    half-present case, which is worse because it looks like a modeling bug
+    rather than a data-extract one.
+    """
+    role_to_real = {2024: pair[0], 2025: pair[1]}
+    for col in FEATS:
+        if col not in df.columns:
+            continue
+        for role, sub in df.groupby("year")[col]:
+            if sub.notna().sum() == 0:
+                raise RuntimeError(
+                    f"model feature {col!r} is entirely missing for the "
+                    f"{role_to_real.get(role, role)} season in this extract. "
+                    f"Every training row would drop, so nothing can fit. Use an "
+                    f"extract that carries {col} for BOTH seasons (e.g. the "
+                    f"realvelo_v3 extract for 2025/2026), or rebuild the extract."
+                )
+
+
+def add_fastball_diffs(df):
+    """Recompute the three 'vs primary fastball' differentials on a robust anchor.
+
+    OVERRIDES vertbreakdiff / horzbreakdiff / velocity_differential as they arrive from the
+    source CSV. target_and_calculated_pipeline.py builds them against `FastestPitchType`,
+    which it defines as the tag containing the pitcher's SINGLE fastest pitch. Two things go
+    wrong with that, both measured on 2026 D1 (2026-08-17):
+
+      1. The anchor is tag-scoped, and 2436 of 5714 pitchers spread their fastballs over two
+         or more tags ("Fastball" and "FourSeamFastBall" being the usual pair). One radar
+         reading decides which tag wins, so for 409 pitchers the anchor was the MINORITY
+         fastball tag, covering under half their fastballs for 19% of them. Every
+         differential for every one of that pitcher's pitch types then measures against a
+         partial, unrepresentative fastball.
+      2. A max over noisy readings is not a robust statistic. 693 pitchers had a non-fastball
+         anchor; sinker (580) and two-seam (70) are defensible, but 11 changeups, 8 sliders
+         and a sweeper are not -- those are single hot readings or mis-tags.
+
+    The fix pools ALL of FF_TYPES into one fastball group per pitcher-year and anchors on its
+    mean. Only when a pitcher-year has no fastball at all does it fall back to the hardest
+    other group by MEAN velocity, and that group must clear ANCHOR_MIN_N pitches first.
+
+    TWO JUDGEMENT CALLS worth knowing about, both flagged to Jack 2026-08-17:
+      - The anchor is per pitcher-YEAR, not per pitcher. The pipeline pooled both seasons,
+        which mixes arsenals across a year in which a pitcher may have added or dropped a
+        pitch. Within-season is the right reference for a within-season grade, and it also
+        keeps the score frame and the criterion frame from sharing an anchor.
+      - Sinkers and two-seams are NOT pooled into the fastball anchor, so "differential vs
+        fastball" keeps meaning "vs the four-seam family". A sinker-primary pitcher with no
+        four-seam still gets a sinker anchor through the fallback. Dan's "a sinker is a
+        fastball" argues the other way and would change what the feature means for every
+        off-speed pitch, so it is deliberately not done here.
+    """
+    src = list(DIFF_COLS)
+    d = df[["PitcherId", "year", "TaggedPitchType"] + src].copy()
+    # one pooled fastball group per pitcher-year; every other tag stays its own group
+    d["_grp"] = np.where(d["TaggedPitchType"].isin(FF_TYPES), "_FF", d["TaggedPitchType"])
+    g = d.groupby(["PitcherId", "year", "_grp"], dropna=False).agg(
+        _ivb=("InducedVertBreak", "mean"), _hb=("HorzBreak", "mean"),
+        _velo=("RelSpeed", "mean"), _n=("RelSpeed", "count")).reset_index()
+    g = g[g["_n"] > 0]
+    # priority: a real fastball group always wins; otherwise the hardest group that clears
+    # ANCHOR_MIN_N; otherwise the hardest group at all. Sorting ascending and taking the last
+    # row per pitcher-year applies that order, with mean velocity as the within-tier rank.
+    g["_pri"] = np.where(g["_grp"] == "_FF", 2, np.where(g["_n"] >= ANCHOR_MIN_N, 1, 0))
+    anchor = (g.sort_values(["_pri", "_velo"]).groupby(["PitcherId", "year"]).tail(1)
+              .rename(columns={"_grp": "anchor_type", "_n": "anchor_n"}))
+    # .to_numpy(), NOT a Series copy: the merge below hands back a fresh RangeIndex, while df
+    # arrives here with the holes left by the dropna and level filters in load_pitches.
+    # Subtracting the two Series then aligns on index, pairs up unrelated rows, and reports a
+    # mean |change| of ~9.7 inches for what is really ~0.42. Positional comparison only.
+    before = {c: df[c].to_numpy(copy=True) for c in DIFF_COLS.values() if c in df.columns}
+    df = df.merge(anchor[["PitcherId", "year", "anchor_type", "anchor_n",
+                          "_ivb", "_hb", "_velo"]], on=["PitcherId", "year"], how="left")
+    for s, out, ref in (("InducedVertBreak", "vertbreakdiff", "_ivb"),
+                        ("HorzBreak", "horzbreakdiff", "_hb"),
+                        ("RelSpeed", "velocity_differential", "_velo")):
+        df[out] = df[s] - df[ref]
+    df = df.drop(columns=["_ivb", "_hb", "_velo"])
+    moved = [f"{c} mean |change| {float(np.abs(df[c].to_numpy() - before[c]).mean()):.3f}"
+             for c in before if c in df.columns]
+    print(f"*** DIFFERENTIAL ANCHOR REBUILT: {(df['anchor_type'] == '_FF').mean():.1%} of "
+          f"pitches anchored on a pooled fastball group; {'; '.join(moved)} ***")
     return df
 
 
@@ -325,10 +562,17 @@ def add_adjusted(df, K=BATTER_K):
 
 # ---------------- fixed Stuff+ reference ----------------
 
-def stuff_ridge(df, return_model=False, pitch_mask=None):
+def stuff_ridge(df, return_model=False, pitch_mask=None, feats=None):
     """Rows of one pitch type with complete features; adds ridge_pred
-    (Ridge alpha=10, trained 2024). pitch_mask defaults to four-seams."""
+    (Ridge alpha=10, trained 2024).
+
+    pitch_mask defaults to four-seams and feats to FEATS, so every pre-2026-08-17
+    caller gets exactly the four-seam model it asked for. For any other pitch type
+    pass BOTH, from pitch_mask()/feats_for() -- passing a mask without its feature
+    list would grade, say, changeups on the four-seam feature set.
+    """
     mask = df["is_ff"] if pitch_mask is None else pitch_mask
+    feats = list(FEATS) if feats is None else list(feats)
     ff = df[mask].copy()
     # Arm-side frame for the two handedness-mirrored geometry features (see FEATS note):
     # one estimable slope per feature instead of a pooled average over two opposite
@@ -341,11 +585,11 @@ def stuff_ridge(df, return_model=False, pitch_mask=None):
     # dropna so rows missing a source column are cut once on the final feature list.
     for out, src in DEV_SRC.items():
         ff[out] = (ff[src] - ff["is_lhp"].map(DEV_CENTRES[out])).abs()
-    ff = ff.dropna(subset=FEATS + ["Target"])
+    ff = ff.dropna(subset=feats + ["Target"])
     train = ff[ff["year"] == 2024]
     model = make_pipeline(StandardScaler(), Ridge(alpha=RIDGE_ALPHA))
-    model.fit(train[FEATS].values, train["Target"].values)
-    ff["ridge_pred"] = model.predict(ff[FEATS].values)
+    model.fit(train[feats].values, train["Target"].values)
+    ff["ridge_pred"] = model.predict(ff[feats].values)
     return (ff, model) if return_model else ff
 
 

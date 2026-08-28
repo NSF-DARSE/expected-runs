@@ -342,7 +342,7 @@ describe('useStaffBoard', () => {
     const { result } = renderHook(() => useStaffBoard(), { wrapper: wrap() });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data!.manifest.dataThrough).toBe('2026-03-15');
-    expect(result.current.data!.board.pitchers[0].name).toBe('Moyzan, Ben');
+    expect(result.current.data!.board.pitchers[0].name).toBe('Test-Pitcher, Alpha');
     expect(result.current.data!.board.pitchers[0].pitch).toBe(134);
     expect(result.current.data!.board.pitchers[0].locFlag).toBe('');
   });
@@ -359,10 +359,10 @@ describe('useStaffBoard', () => {
 ```json
 { "population": 543, "team": "DEL_BLU",
   "pitchers": [
-    { "id": 101, "name": "Moyzan, Ben", "hand": "R", "ff": 210, "stuff": 120, "loc": 128, "adjres": 112, "pitch": 134,
+    { "id": 101, "name": "Test-Pitcher, Alpha", "hand": "R", "ff": 210, "stuff": 120, "loc": 128, "adjres": 112, "pitch": 134,
       "whiff": 0.23, "zone": 0.52, "heart": 0.24, "meanHeight": 3.1, "locFlag": "",
       "stuffAttr": [["effectivevelo", 34], ["inducedvertbreak", 10], ["horzbreak", 6], ["relheight", -1], ["relside", -3]] },
-    { "id": 102, "name": "Marose, Alex", "hand": "L", "ff": 39, "stuff": 108, "loc": 99, "adjres": 101, "pitch": 104,
+    { "id": 102, "name": "Test-Pitcher, Bravo", "hand": "L", "ff": 39, "stuff": 108, "loc": 99, "adjres": 101, "pitch": 104,
       "whiff": 0.31, "zone": 0.49, "heart": 0.22, "meanHeight": 3.0, "locFlag": "small sample",
       "stuffAttr": [["effectivevelo", 12], ["horzbreak", 5], ["inducedvertbreak", 3], ["relheight", -2], ["relside", -4]] }
   ] }
@@ -606,10 +606,10 @@ def test_ids_are_stable_across_calls():
 ```json
 { "population": 543, "team": "DEL_BLU",
   "staff": [
-    { "name": "Moyzan, Ben", "hand": "R", "ff": 210, "adjres": 112.0, "stuff": 120.0, "loc": 128.0, "pitch": 134.0,
+    { "name": "Test-Pitcher, Alpha", "hand": "R", "ff": 210, "adjres": 112.0, "stuff": 120.0, "loc": 128.0, "pitch": 134.0,
       "whiff": 0.23, "zone": 0.52, "heart": 0.24, "mean_height": 3.1, "loc_flag": "",
       "stuff_attr": [["effectivevelo", 34.0], ["inducedvertbreak", 10.0], ["horzbreak", 6.0], ["relheight", -1.0], ["relside", -3.0]] },
-    { "name": "Marose, Alex", "hand": "L", "ff": 39, "adjres": 101.0, "stuff": 108.0, "loc": 99.0, "pitch": 104.0,
+    { "name": "Test-Pitcher, Bravo", "hand": "L", "ff": 39, "adjres": 101.0, "stuff": 108.0, "loc": 99.0, "pitch": 104.0,
       "whiff": 0.31, "zone": 0.49, "heart": 0.22, "mean_height": 3.0, "loc_flag": "small sample",
       "stuff_attr": [["effectivevelo", 12.0], ["horzbreak", 5.0], ["inducedvertbreak", 3.0], ["relheight", -2.0], ["relside", -4.0]] }
   ],
@@ -984,8 +984,8 @@ describe('StaffBoard', () => {
     const rows = await screen.findAllByRole('row');
     // header + 2 data rows
     const first = within(rows[1]);
-    expect(first.getByText('Moyzan, Ben')).toBeInTheDocument();
-    expect(screen.getByText(/small sample/i)).toBeInTheDocument(); // Marose flagged
+    expect(first.getByText('Test-Pitcher, Alpha')).toBeInTheDocument();
+    expect(screen.getByText(/small sample/i)).toBeInTheDocument(); // Bravo flagged
   });
 });
 ```

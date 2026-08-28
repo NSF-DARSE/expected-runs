@@ -146,6 +146,47 @@ def wanted(session: dict, team: str | None) -> bool:
     return True
 
 
+_DEL_SHORTNAME = "DEL_BLU"
+
+
+def wanted_practice(session: dict) -> bool:
+    """Delaware practice sessions: bullpens and intrasquads, display-only.
+
+    This is a SEPARATE predicate from wanted() on purpose, not a relaxed
+    version of it. wanted() encodes what the trained model's dataset actually
+    contains (verified, non-Private) -- backfill.py and pull.py's default path
+    depend on that filter matching Final_Target_Calc_1535 exactly, because the
+    training extract is built by walking whatever wanted() lets through.
+
+    Delaware's bullpens and intrasquad scrimmages are unverified AND carry a
+    "Private" gameID -- wanted() rejects them for good reason (they should
+    never silently enter a training pull), but that same data is exactly what
+    a coach-facing practice viewer needs to display. wanted_practice() exists
+    to let a caller opt into that data explicitly, restricted to Delaware
+    only, without touching wanted()'s behavior at all.
+
+    If someone "simplifies" this by merging the two predicates (e.g. adding a
+    team-restricted carve-out for Private/unverified sessions directly inside
+    wanted()), every future --team-less or non-Delaware training backfill
+    would start pulling other teams' private captures too, and worse, a
+    Delaware training backfill would start silently absorbing bullpen/
+    intrasquad rows into the model's dataset -- the exact contamination this
+    split is meant to prevent. Keep them separate; let the caller (pull.py's
+    --practice flag) choose which one to use.
+    """
+    game_id = session.get("gameID")
+    if not game_id:
+        return False
+    names = {session.get("homeTeam", {}).get("shortName"),
+             session.get("awayTeam", {}).get("shortName")}
+    if _DEL_SHORTNAME not in names:
+        return False
+    # Accept exactly what wanted() would reject Delaware for: unverified
+    # and/or Private. (A verified, non-Private Delaware session is already
+    # covered by wanted() and would just be a normal game pull.)
+    return (not session.get("verified")) or "Private" in game_id
+
+
 def latest_date_on_disk(base: str) -> datetime | None:
     """Latest year/month/day date that has a CSV dir with at least one game."""
     latest = None

@@ -35,6 +35,13 @@ Usage:
 Data note: TrackMan data is licensed (Level II). --out must be local or
 UD-controlled storage and must not be a tracked path in git. This script
 prints counts and gameIDs only, never pitch-level values.
+
+Practice mode (--practice): opt-in, Delaware-only. Uses backfill.wanted_practice
+instead of backfill.wanted to also pull bullpen/intrasquad sessions, which are
+unverified and/or "Private"-gameID and therefore excluded from every training
+pull. Writes a PRACTICE_ONLY.txt marker into --out so the tree cannot be
+mistaken for (or accidentally pointed at as) training extract input. Never run
+--practice against a directory that also holds or will hold a training pull.
 """
 
 from __future__ import annotations
@@ -48,7 +55,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
-from backfill import ApiClient, out_path, wanted, windows
+from backfill import ApiClient, out_path, wanted, wanted_practice, windows
 from config import load_config
 from flatten import flatten_game
 
@@ -125,14 +132,17 @@ def write_game(client: ThreadSafeClient, session: dict, base: str) -> str:
     return game_id
 
 
-def manifest_path(base: str, start: datetime, end: datetime, team: str | None) -> str:
+def manifest_path(base: str, start: datetime, end: datetime, team: str | None,
+                  practice: bool = False) -> str:
     tag = f"{start:%Y%m%d}_{end:%Y%m%d}" + (f"_{team}" if team else "")
+    if practice:
+        tag += "_practice"
     return os.path.join(base, "_manifest", f"{tag}.json")
 
 
 def discover_range(client: ThreadSafeClient, base: str, start: datetime,
                    end: datetime, team: str | None,
-                   rediscover: bool = False) -> dict[str, dict]:
+                   rediscover: bool = False, practice: bool = False) -> dict[str, dict]:
     """Discover the games in a range, caching the result next to the tree.
 
     Discovery has a far tighter quota than the data endpoints, and a run that
@@ -140,7 +150,7 @@ def discover_range(client: ThreadSafeClient, base: str, start: datetime,
     again just to learn what it already knew. The cache makes a resume cost
     zero discovery calls.
     """
-    cache = manifest_path(base, start, end, team)
+    cache = manifest_path(base, start, end, team, practice)
     if not rediscover and os.path.exists(cache):
         with open(cache, encoding="utf-8") as fh:
             sessions = json.load(fh)
@@ -148,12 +158,13 @@ def discover_range(client: ThreadSafeClient, base: str, start: datetime,
               flush=True)
         return sessions
 
+    predicate = (lambda s: wanted_practice(s)) if practice else (lambda s: wanted(s, team))
     sessions: dict[str, dict] = {}
     for i, (w_from, w_to) in enumerate(windows(start, end)):
         if i:
             time.sleep(_DISCOVERY_PACE)
         found = client.discover(w_from, w_to)
-        kept = [s for s in found if wanted(s, team)]
+        kept = [s for s in found if predicate(s)]
         print(f"window {w_from[:10]} .. {w_to[:10]}: "
               f"{len(found)} sessions, {len(kept)} to pull", flush=True)
         for s in kept:
@@ -182,6 +193,13 @@ def main() -> None:
     p.add_argument("--rediscover", action="store_true",
                    help="Ignore the cached discovery manifest and re-run discovery")
     p.add_argument("--dry-run", action="store_true", help="Discover and count; write nothing")
+    p.add_argument("--practice", action="store_true",
+                   help="Delaware-only opt-in mode: also pull unverified/Private "
+                        "sessions (bullpens, intrasquads) that wanted() rejects for "
+                        "training. Display-only; the output tree is marked so it "
+                        "cannot be mistaken for a training extract input. See "
+                        "backfill.wanted_practice for why this is a separate "
+                        "predicate from wanted().")
     args = p.parse_args()
 
     start = datetime.fromisoformat(args.date_from).replace(tzinfo=timezone.utc)
@@ -190,6 +208,29 @@ def main() -> None:
         raise SystemExit("--from must be before --to")
     if args.workers < 1:
         raise SystemExit("--workers must be >= 1")
+    if args.practice and args.team:
+        raise SystemExit("--practice already restricts to Delaware; drop --team")
+
+    if args.practice:
+        marker = os.path.join(args.out, "PRACTICE_ONLY.txt")
+        if not args.dry_run:
+            os.makedirs(args.out, exist_ok=True)
+            with open(marker, "w", encoding="utf-8") as fh:
+                fh.write(
+                    "This tree was populated with --practice and contains Delaware "
+                    "bullpen/intrasquad sessions that are unverified and/or carry a "
+                    "\"Private\" gameID.\n\n"
+                    "DO NOT point the model training extract (component_model/) at "
+                    "this directory, and do not merge it into a training pull tree. "
+                    "These sessions are excluded from training by backfill.wanted() "
+                    "on purpose -- they lack the verification/labeling a training "
+                    "target requires. This tree exists only for display/coach-facing "
+                    "use of the physical pitch-tracking features (velo, movement, "
+                    "release), never for computing run-value targets or feeding "
+                    "expected-runs model fitting.\n")
+        print(f"--practice mode: writing to {args.out} (Delaware-only, "
+              f"unverified/Private sessions included; see PRACTICE_ONLY.txt)",
+              flush=True)
 
     deadline = Deadline(args.timeout_hours)
     limiter = RateLimiter(args.requests_per_hour)
@@ -199,7 +240,7 @@ def main() -> None:
               f"(~{args.requests_per_hour / 2:.0f} games/hour)", flush=True)
 
     sessions = discover_range(client, args.out, start, end, args.team,
-                              rediscover=args.rediscover)
+                              rediscover=args.rediscover, practice=args.practice)
     print(f"\ntotal games discovered: {len(sessions)}", flush=True)
     if args.dry_run:
         return

@@ -934,3 +934,50 @@ def test_build_trend_prefers_relspeed_and_falls_back_to_effectivevelo():
     df2 = _trend_frame(velo_col="EffectiveVelo")
     trend2 = mod.build_trend(df2, grades, "FF", "2026-05-25", floor_n=15)
     assert trend2["velo"]["delta"] == pytest.approx(2.0, abs=0.5)
+
+
+def test_model_artifact_pads_a_types_unused_features_to_zero_on_the_union_order():
+    """Every type's arrays are positional against ONE featureOrder in the browser.
+    A type whose ridge omits a feature must ship a zero coefficient and zero
+    population z there (contributes nothing), unit scale and zero mean (stays
+    finite), and name the features it really uses."""
+    mod = _load_pages_module()
+    union = ["SpinRate", "Extension", "velocity_differential"]
+    fitted = {"ChangeUp": {
+        "feats": ["Extension", "velocity_differential"],
+        "coef": [0.002, -0.004], "scaler_mean": [6.2, -8.0], "scaler_scale": [0.2, 1.5],
+        "population_mean_z": [0.1, -0.1], "mu": 0.0, "sd": 0.02, "n_qualified": 2,
+    }}
+    art = mod.build_model_artifact(fitted, union)["byPitchType"]["ChangeUp"]
+    assert art["coef"] == [0.0, 0.002, -0.004]
+    assert art["scalerMean"] == [0.0, 6.2, -8.0]
+    assert art["scalerScale"] == [1.0, 0.2, 1.5]
+    assert art["populationMeanZ"] == [0.0, 0.1, -0.1]
+    assert art["features"] == ["Extension", "velocity_differential"]
+
+
+def test_model_artifact_accepts_a_legacy_state_already_on_the_published_order():
+    mod = _load_pages_module()
+    feats, fitted = _fitted()
+    art = mod.build_model_artifact({"FF": fitted}, feats)["byPitchType"]["FF"]
+    assert len(art["coef"]) == len(feats)
+    assert art["features"] == feats
+
+
+def test_model_artifact_refuses_a_legacy_state_of_the_wrong_length():
+    mod = _load_pages_module()
+    feats, fitted = _fitted()
+    with pytest.raises(ValueError):
+        mod.build_model_artifact({"FF": fitted}, feats[:-1])
+
+
+def test_pitch_feature_vectors_carry_none_not_nan_for_a_missing_value():
+    """The union order carries features a type's model does not use, so a
+    missing raw value no longer drops the pitch; it must ship as null."""
+    mod = _load_pages_module()
+    feats, fitted = _fitted()
+    fitted["pitches"].loc[0, feats[0]] = np.nan
+    records = mod.build_pitcher_records({"FF": fitted}, feats, floor_n=1, asof="2026-03-10",
+                                        min_type_pitches=1)
+    first = records[0]["pitches"][0]["f"]
+    assert first[0] is None and all(v is not None for v in first[1:])

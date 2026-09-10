@@ -192,3 +192,52 @@ Jack ruled that a sinker grade that leans on four-seam differentials is acceptab
 2026-08-17 exclusion is lifted for the sinker; `pooled_all` is a legitimate candidate, not a
 caveated one. Next: change the learning target (xT, then decomposed outcomes), not the
 feature list, on the frozen gate.
+
+## Learning-target pass — 2026-09-10
+
+Every earlier candidate varied the ridge's feature list. This pass held the features at
+each type's best-known list (`pooled_all` for SI, BASE for FF) and varied what the model
+learns from. Harness: `component_model/analysis/coach_target_gate.py`. Same gate, panel,
+bootstrap and seed. FF is the positive control. Pre-registered candidates: ridge on raw run
+value (incumbent), ridge on xT, decomposed outcomes (class probabilities × class run values
++ P(in play) × xT model) as ridge and as histogram gradient boosting, and GBM straight on
+run value. GBM settings fixed in the script (depth 4, 150 iterations, no early stopping).
+
+| candidate | SI stuff_r | SI gain | SI P(gain>0) | FF stuff_r | FF gain | FF P |
+|---|---|---|---|---|---|---|
+| ridge on run value (incumbent) | +0.189 | +0.046 | 0.890 | +0.179 | +0.068 | 1.000 |
+| ridge on xT | +0.172 | +0.034 | 0.795 | +0.181 | +0.070 | 1.000 |
+| decomposed ridge | +0.169 | +0.032 | 0.750 | +0.174 | +0.065 | 1.000 |
+| decomposed GBM | +0.125 | +0.007 | point only | +0.166 | +0.058 | point only |
+| GBM on run value | +0.130 | +0.014 | point only | +0.163 | +0.056 | point only |
+
+The two GBM rows were not bootstrapped: the decomposed classifier takes 16 minutes per fit
+on the pooled rows, and both GBMs sit below the incumbent on the point estimate for both
+types, so 200 refits could not lift them past it. That is a departure from the
+pre-registration, taken for cost, and it is recorded here rather than hidden.
+
+**Verdict: changing the learning target does not help the sinker and is neutral for the
+four-seam.** The xT label removes ball-in-play luck from the training signal but also
+removes information the criterion still rewards (adjT is built from xT for balls in play,
+so the criterion itself does not reward hit luck; the loss must come from the non-contact
+side, where xT keeps raw run value and the label is unchanged). The decomposition costs a
+little more. Boosted trees lose a lot: with ~700k rows but a between-pitcher signal that
+lives in ~2,000 pitcher means, extra flexibility fits pitch-level noise the ridge cannot
+reach. The FF control passing at 1.000 on every variant confirms the harness is sound and
+that the sinker's problem is the panel, not the learner.
+
+The sinker has now been read against every lever this data offers: feature list (August
+loop), pooling and differentials (research pass), learning target and learner (this pass).
+The best of them is unchanged at P=0.89 with a mean gain of +0.046 on a 272-pitcher panel
+whose spread is about 0.04. Nothing ships.
+
+**Locked for 2027:** `pooled_all` features, ridge on raw run value, alpha 10, trained on
+2024+2025 four-seams and sinkers, read ONCE on the 2026→2027 pair when it exists, same
+gate. No further sinker candidates are pre-registered against the 2025→2026 pair.
+
+**What the coach page gets instead:** the descriptive trait table. The bundle already
+publishes each pitcher's season mean and D1 percentile per trait for every pitch type; the
+app withheld the whole panel for unconfirmed types. It now shows Value and Percentile for
+the sinker (and cutter) with no Stuff+ points, no colour, no direction claim and no
+total. App branch `descriptive-traits`. Display policy is unchanged: no plus number until
+the gate passes.

@@ -23,10 +23,23 @@ import pandas as pd
 import arsenal as ar
 import fair_criterion as fc
 
-# Four-seam floor is script 06's measured value. Secondary floors are UNMEASURED;
-# they reuse the four-seam number as a conservative stand-in. See the spec's
-# "Honest gap" note. Do not present these as derived for non-FF types.
+# Pitches of a type a pitcher needs to enter the QUALIFYING POPULATION that sets
+# each type's display scale (mu/sd, reference percentiles) and the recent-change
+# window gate. Script 06's four-seam Location+ value, applied to every type as a
+# conservative stand-in. This is NOT the small-sample flag: see STUFF_FLAG_FLOOR.
 SAMPLE_FLOOR = 100
+
+# Pitches of a type before a pitcher's own Stuff+ carries at least 75% of the
+# signal a full-season read would, per model group. Measured by
+# 16_season_floor.py on the graded D1 season with game-split reliability
+# (rel(n) = n / (n + n0); n0 FF 4.9, SI 5.1, FC 1.8, SL 1.5, CB 1.0, CH 2.1):
+# the 75% mark falls at FF 14, SI 13, FC 5, SL 5, CB 3, CH 6. Rounded UP to the
+# next multiple of five, never down. Stuff+ is a prediction from physical
+# measurements that barely vary within a pitcher, which is why it settles
+# within a couple of outings while Location+ (a run-value surface read) needs
+# ~80 four-seams for the same share. `aboveFloor` and `sampleFloor` on the
+# pitcher page read from here; the display scale keeps SAMPLE_FLOOR.
+STUFF_FLAG_FLOOR = {"FF": 15, "SI": 15, "FC": 10, "SL": 10, "CB": 10, "CH": 10}
 MIN_TYPE_PITCHES = 25   # skip a pitch type for a pitcher below this
 SEASON_ROLE_YEAR = 2025  # fair_criterion relabels the year pair to 2024/2025 roles
 
@@ -94,12 +107,23 @@ def build_trend(sub: pd.DataFrame, grades: np.ndarray, tname: str, asof: str,
     return out
 
 
+def flag_floor_for(tname: str) -> int:
+    """Small-sample flag floor for a bundle pitch type, via its model group."""
+    return STUFF_FLAG_FLOOR[ar.MODEL_GROUPS[tname]]
+
+
 def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, asof: str,
-                          min_type_pitches: int = MIN_TYPE_PITCHES) -> list[dict]:
+                          min_type_pitches: int = MIN_TYPE_PITCHES,
+                          flag_floor: dict | None = None) -> list[dict]:
     """Assemble one record per pitcher from the per-type fitted results.
 
-    min_type_pitches is a parameter rather than a module constant so tests can
-    exercise the assembly on small synthetic frames.
+    floor_n gates the recent-change window and the trend block (script 06's
+    value). The `aboveFloor` flag reads the per-type Stuff+ floor instead:
+    flag_floor maps bundle type name -> pitches, defaulting to STUFF_FLAG_FLOOR
+    through the type's model group.
+
+    min_type_pitches and flag_floor are parameters rather than module constants
+    so tests can exercise the assembly on small synthetic frames.
     """
     all_ids: set = set()
     for state in fitted_by_type.values():
@@ -175,7 +199,8 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
                            if state.get("adj_sd") and "adjT" in sub.columns
                            and sub["adjT"].notna().any() else None),
                 "trend": build_trend(sub, grades, tname, asof, floor_n),
-                "aboveFloor": bool(len(sub) >= floor_n),
+                "aboveFloor": bool(len(sub) >= (flag_floor[tname] if flag_floor is not None
+                                                 else flag_floor_for(tname))),
                 "typical": [float(v) for v in sub[feats].mean().values],
                 # Percentile of each of his typical trait values against the
                 # qualifying pitchers for this type. Computed here rather than in
@@ -291,7 +316,7 @@ def build_model_artifact(fitted_by_type: dict, feats: list[str]) -> dict:
                 # frontend built against an older bundle degrades gracefully.
                 "displayPitchLocMu": s.get("loc_pitch_mu"),
                 "displayPitchLocSd": s.get("loc_pitch_sd"),
-                "sampleFloor": SAMPLE_FLOOR,
+                "sampleFloor": flag_floor_for(tname),
                 "nQualified": s["n_qualified"],
             }
             for tname, s in fitted_by_type.items()

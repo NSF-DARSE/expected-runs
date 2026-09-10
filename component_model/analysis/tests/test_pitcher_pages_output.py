@@ -981,3 +981,30 @@ def test_pitch_feature_vectors_carry_none_not_nan_for_a_missing_value():
                                         min_type_pitches=1)
     first = records[0]["pitches"][0]["f"]
     assert first[0] is None and all(v is not None for v in first[1:])
+
+
+def test_above_floor_reads_the_per_type_stuff_floor_not_the_scale_floor():
+    """The small-sample flag and the qualifying-population floor are different
+    questions (16_season_floor.py): Stuff+ settles in a handful of pitches, the
+    display scale still wants well-measured pitchers. floor_n must not leak
+    into aboveFloor."""
+    mod = _load_pages_module()
+    feats, fitted = _fitted()
+    # Three pitches per pitcher in the fixture; the measured FF floor is 15.
+    records = mod.build_pitcher_records({"FF": fitted}, feats, floor_n=1, asof="2026-03-10",
+                                        min_type_pitches=1)
+    assert all(r["arsenal"][0]["aboveFloor"] is False for r in records)
+    assert mod.flag_floor_for("FF") == mod.STUFF_FLAG_FLOOR["FF"] == 15
+    # An explicit per-type floor overrides it, and a huge floor_n does not matter.
+    records = mod.build_pitcher_records({"FF": fitted}, feats, floor_n=10_000, asof="2026-03-10",
+                                        min_type_pitches=1, flag_floor={"FF": 3})
+    assert all(r["arsenal"][0]["aboveFloor"] is True for r in records)
+
+
+def test_artifact_sample_floor_is_the_type_flag_floor():
+    mod = _load_pages_module()
+    feats, fitted = _fitted()
+    art = mod.build_model_artifact({"FF": fitted, "Splitter": fitted}, feats)
+    assert art["byPitchType"]["FF"]["sampleFloor"] == 15
+    # Splitter rides the pooled CH group, so it carries the CH floor.
+    assert art["byPitchType"]["Splitter"]["sampleFloor"] == mod.STUFF_FLAG_FLOOR["CH"] == 10

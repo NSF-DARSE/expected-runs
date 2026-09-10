@@ -212,7 +212,11 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
                     "z": round(float(p["PlateLocHeight"]), 3),
                     "c": str(p["count12"]), "g": float(g),
                     "l": None if lg is None else float(lg),
-                    "f": [float(p[f]) for f in feats],
+                    # None, not NaN, where a reported feature is missing on this
+                    # pitch: the union order carries features a type's model does
+                    # not use (SpinRate on a changeup), so a missing value no
+                    # longer drops the pitch, and NaN is not JSON.
+                    "f": [None if pd.isna(p[f]) else float(p[f]) for f in feats],
                 }
                 # Coach-legible outcome ("Called strike", "Single", ...) and the
                 # opposing batter's name -- backlog item 5, 2026-08-17 staff
@@ -236,15 +240,39 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
     return records
 
 
+def _aligned(state: dict, key: str, feats: list[str], pad: float) -> list[float]:
+    """One model array laid out on the published feature order.
+
+    A type's ridge sees only its own feature list (state["feats"], from
+    fc.FEATS_BY_PITCH); the browser indexes every type's arrays against ONE
+    featureOrder. Features the type's model does not use get `pad`: a zero
+    coefficient and a zero population z contribute exactly nothing to a grade or
+    a trait row, and unit scale with zero mean keeps the standardisation finite.
+    A fitted state that predates the `feats` key (an old fixture) is taken to be
+    laid out on the published order already.
+    """
+    own = state.get("feats")
+    values = list(state[key])
+    if own is None:
+        if len(values) != len(feats):
+            raise ValueError(f"{key} has {len(values)} entries for {len(feats)} features and no feature list")
+        return [float(v) for v in values]
+    by_name = dict(zip(own, values))
+    return [float(by_name.get(f, pad)) for f in feats]
+
+
 def build_model_artifact(fitted_by_type: dict, feats: list[str]) -> dict:
     return {
         "featureOrder": list(feats),
         "byPitchType": {
             tname: {
-                "coef": [float(v) for v in s["coef"]],
-                "scalerMean": [float(v) for v in s["scaler_mean"]],
-                "scalerScale": [float(v) for v in s["scaler_scale"]],
-                "populationMeanZ": [float(v) for v in s["population_mean_z"]],
+                "coef": _aligned(s, "coef", feats, 0.0),
+                "scalerMean": _aligned(s, "scaler_mean", feats, 0.0),
+                "scalerScale": _aligned(s, "scaler_scale", feats, 1.0),
+                "populationMeanZ": _aligned(s, "population_mean_z", feats, 0.0),
+                # Which of featureOrder this type's ridge actually uses, so a
+                # consumer can tell a real zero coefficient from padding.
+                "features": list(s.get("feats") or feats),
                 "displayMu": float(s["mu"]),
                 "displaySd": float(s["sd"]),
                 # Location+ display moments, four-seam only. None elsewhere so the
@@ -391,7 +419,11 @@ def main() -> int:
     fitted = {}
     for tname, tags in ar.PITCH_TYPES:
         try:
-            state = ar.fit_type(pit, tags, SAMPLE_FLOOR, fc, SEASON_ROLE_YEAR)
+            # Each display type on the model that was validated for it (its
+            # fair_criterion group and feature list), reported on the union
+            # feature order so every type shares one positional contract.
+            state = ar.fit_type(pit, tags, SAMPLE_FLOOR, fc, SEASON_ROLE_YEAR,
+                                group=ar.MODEL_GROUPS[tname], report_feats=fc.UNION_FEATS)
         except ValueError as err:
             print(f"skipping {tname}: {err}")
             continue
@@ -416,14 +448,14 @@ def main() -> int:
         state["pitches"] = state["pitches"][state["pitches"]["PitcherId"].isin(team_ids)].copy()
 
     asof = str(pd.to_datetime(fitted["FF"]["pitches"]["Date"]).max().date())
-    records = build_pitcher_records(fitted, fc.FEATS, SAMPLE_FLOOR, asof)
+    records = build_pitcher_records(fitted, fc.UNION_FEATS, SAMPLE_FLOOR, asof)
     print(f"{len(records)} pitchers on {args.team}")
 
     payload = {
         "team": args.team,
         "season": int(args.year_pair[1]),
         "pitchTypes": list(fitted.keys()),
-        "model": build_model_artifact(fitted, fc.FEATS),
+        "model": build_model_artifact(fitted, fc.UNION_FEATS),
         "grids": build_grids(pit),
         "pitchers": records,
     }

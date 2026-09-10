@@ -186,6 +186,14 @@ FEATS_BY_PITCH = {
     "CH": [f for f in BASE_FEATS if f != "SpinRate"] + DIFF_FEATS,
 }
 
+# Every feature any per-type model uses, in one fixed order. This is the shipped
+# model.featureOrder for the pitcher pages (14_pitcher_pages.py): one positional
+# contract for the browser, with each type's coefficient padded to zero on the
+# features its own list leaves out. Every FEATS_BY_PITCH list is a subsequence of
+# it, so the padding is by name and never by position.
+UNION_FEATS = BASE_FEATS + DIFF_FEATS
+assert all(set(v) <= set(UNION_FEATS) for v in FEATS_BY_PITCH.values())
+
 
 def pitch_mask(df, group):
     """Rows of one PITCH_GROUPS key. Raises on an unknown key rather than silently empty."""

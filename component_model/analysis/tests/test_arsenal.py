@@ -392,3 +392,84 @@ def test_out_of_zone_bands_are_handedness_symmetric():
     side, so the mirrored pitch to a LHH lands in the same band."""
     inside_out = ar.ZONE_HALF_WIDTH + 4.0 / 12.0
     assert _region_at(-inside_out, 2.5, "Right") == _region_at(inside_out, 2.5, "Left")
+
+
+# ---- fit_type grades a display tag on its validated model group ------------
+
+def _group_frame(seed=5):
+    """Two seasons of synthetic changeups and splitters plus the fastballs that
+    anchor them, with every raw column stuff_ridge needs. Small but real: the
+    ridge is fitted for real, so the assertions are about wiring, not fit."""
+    import fair_criterion as fc
+    rng = np.random.default_rng(seed)
+    rows = []
+    for year in (2024, 2025):
+        for pid in range(1, 7):
+            for tag, n in (("FourSeamFastBall", 20), ("ChangeUp", 20), ("Splitter", 20)):
+                for _ in range(n):
+                    rows.append({
+                        "PitcherId": pid, "Pitcher": f"Test-Pitcher, {pid}", "year": year,
+                        "PitcherThrows": "Right", "is_lhp": 0, "is_lhb": 0,
+                        "TaggedPitchType": tag, "is_ff": tag == "FourSeamFastBall",
+                        "SpinRate": rng.normal(2200 if tag == "FourSeamFastBall" else 1500, 100),
+                        "Extension": rng.normal(6.2, 0.2), "HorzBreak": rng.normal(8, 3),
+                        "InducedVertBreak": rng.normal(15 if tag == "FourSeamFastBall" else 5, 3),
+                        "RelSpeed": rng.normal(92 if tag == "FourSeamFastBall" else 84, 1.5),
+                        "RelHeight": rng.normal(5.8, 0.2), "RelSide": rng.normal(1.6, 0.3),
+                        "PlateLocSide": rng.normal(0, 0.6), "PlateLocHeight": rng.normal(2.4, 0.6),
+                        "Target": rng.normal(0, 0.05), "adjT": rng.normal(0, 0.05),
+                    })
+    df = pd.DataFrame(rows)
+    return fc.add_fastball_diffs(df), fc
+
+
+def test_fit_type_with_a_group_uses_that_groups_feature_list_not_the_four_seam_one():
+    """The defect this guards: every secondary was fitted on fc.FEATS (SpinRate in,
+    differentials out) because fit_type never passed feats. A changeup graded by
+    the CH group must carry the CH list -- no SpinRate, three differentials."""
+    pit, fc = _group_frame()
+    state = ar.fit_type(pit, {"ChangeUp"}, floor_n=10, fc_module=fc, season_year=2025, group="CH")
+    assert state["feats"] == fc.feats_for("CH")
+    assert "SpinRate" not in state["feats"]
+    assert "velocity_differential" in state["feats"]
+    assert len(state["coef"]) == len(fc.feats_for("CH"))
+    assert state["model_group"] == "CH"
+
+
+def test_splitter_and_changeup_share_the_pooled_ch_model_and_scale():
+    """One model per GROUP, displayed per TAG: both tags fit on the pooled rows,
+    so their coefficients and display moments are identical, while each state's
+    pitches hold only its own tag."""
+    pit, fc = _group_frame()
+    ch = ar.fit_type(pit, {"ChangeUp"}, 10, fc, 2025, group="CH")
+    sp = ar.fit_type(pit, {"Splitter"}, 10, fc, 2025, group="CH")
+    np.testing.assert_allclose(ch["coef"], sp["coef"])
+    assert (ch["mu"], ch["sd"]) == (sp["mu"], sp["sd"])
+    assert set(ch["pitches"]["TaggedPitchType"]) == {"ChangeUp"}
+    assert set(sp["pitches"]["TaggedPitchType"]) == {"Splitter"}
+    # The pooled scale counts a pitcher's changeups AND splitters toward the floor.
+    assert ch["n_qualified"] == 6
+
+
+def test_fit_type_reports_reference_features_on_the_published_order():
+    """report_feats widens the percentile reference to the union order while the
+    population z stays on the model's own features."""
+    pit, fc = _group_frame()
+    state = ar.fit_type(pit, {"ChangeUp"}, 10, fc, 2025, group="CH", report_feats=fc.UNION_FEATS)
+    assert list(state["reference_features"].columns) == fc.UNION_FEATS
+    assert len(state["population_mean_z"]) == len(fc.feats_for("CH"))
+
+
+def test_fit_type_refuses_a_display_tag_outside_its_model_group():
+    pit, fc = _group_frame()
+    with pytest.raises(ValueError):
+        ar.fit_type(pit, {"Splitter"}, 10, fc, 2025, group="SL")
+
+
+def test_fit_type_without_a_group_keeps_the_legacy_four_seam_list():
+    """group=None is the pre-2026-09-05 protocol; kept callable so the change is
+    visible as a choice rather than a silent default swap."""
+    pit, fc = _group_frame()
+    state = ar.fit_type(pit, {"ChangeUp"}, 10, fc, 2025)
+    assert state["feats"] == list(fc.FEATS)
+    assert state["model_group"] is None

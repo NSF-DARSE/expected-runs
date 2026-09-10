@@ -305,24 +305,72 @@ def type_mask(pit: pd.DataFrame, tags: set[str] | None) -> pd.Series:
     return pit["TaggedPitchType"].isin(tags)
 
 
-def fit_type(pit: pd.DataFrame, tags: set[str] | None, floor_n: int, fc_module, season_year: int) -> dict:
+# Display type -> the fair_criterion.PITCH_GROUPS key whose model grades it. One
+# model per GROUP, displayed per TAG: Splitter and ChangeUp are graded by the
+# pooled CH model (fair_criterion.PITCH_GROUPS explains the pooling) and read
+# their scale from the pooled group's qualifying pitchers, but each keeps its own
+# arsenal row under the tag the pitcher was thrown.
+MODEL_GROUPS = {
+    "FF": "FF",
+    "Slider": "SL",
+    "ChangeUp": "CH",
+    "Curveball": "CB",
+    "Sinker": "SI",
+    "Cutter": "FC",
+    "Splitter": "CH",
+}
+
+
+def fit_type(pit: pd.DataFrame, tags: set[str] | None, floor_n: int, fc_module, season_year: int,
+             group: str | None = None, report_feats: list[str] | None = None) -> dict:
     """Fit the ridge for one pitch type and derive its display scale.
 
-    Protocol copied from build_portal_data.py (arsenal grade, adopted 2026-07-23):
-    one ridge per pitch type via fc.stuff_ridge(pitch_mask=...), then a display
-    scale from that type's qualifying pitchers.
+    Protocol from build_portal_data.py (arsenal grade, adopted 2026-07-23): one
+    ridge per pitch type via fc.stuff_ridge, then a display scale from that
+    type's qualifying pitchers.
+
+    group names the fair_criterion model group (fc.PITCH_GROUPS / FEATS_BY_PITCH
+    key) that grades this display type. The ridge is then trained on the GROUP's
+    rows with the GROUP's feature list, and the display scale comes from the
+    group's qualifying pitchers; only state["pitches"] is narrowed to the display
+    tags. This is what the incremental-validity gate and the eligibility contract
+    were computed on. Without it (group=None) the type is fitted alone on the
+    four-seam list, fc.FEATS -- the pre-2026-09-05 behaviour, which graded every
+    secondary on a model nobody validated and penalised a splitter for low spin.
+
+    report_feats is the feature order the caller will publish (typical values,
+    percentiles, per-pitch vectors). Defaults to the model's own list; pass the
+    union list so every type's arrays share one positional contract.
 
     season_year is the canonical year role to grade (fair_criterion relabels the
     year pair to 2024/2025 roles, so pass 2025 for the later season).
 
-    Raises ValueError if the type has too few qualifying pitchers to scale.
+    Raises ValueError if the type has too few qualifying pitchers to scale, or if
+    a display tag falls outside its model group.
     """
-    mask = type_mask(pit, tags)
-    pp, model = fc_module.stuff_ridge(pit, pitch_mask=mask, return_model=True)
-    pp = pp[pp["PlateLocSide"].notna() & pp["PlateLocHeight"].notna()].copy()
-    season = pp[pp["year"] == season_year].copy()
+    display_mask = type_mask(pit, tags)
+    if group is None:
+        train_mask, feats = display_mask, list(fc_module.FEATS)
+    else:
+        feats = fc_module.feats_for(group)
+        # FF keeps the is_ff flag as its mask so the three four-seam spellings and
+        # the group definition cannot drift apart on this path.
+        train_mask = display_mask if group == "FF" else fc_module.pitch_mask(pit, group)
+        if bool((display_mask & ~train_mask).any()):
+            raise ValueError(f"display tags {sorted(tags or set())} are not all inside model group {group!r}")
+    report_feats = list(feats) if report_feats is None else list(report_feats)
+    missing = [f for f in feats if f not in report_feats]
+    if missing:
+        raise ValueError(f"report_feats must cover the model's own features; missing {missing}")
 
-    per_pitcher = season.groupby("PitcherId")["ridge_pred"].agg(["size", "mean"])
+    pp, model = fc_module.stuff_ridge(pit, pitch_mask=train_mask, feats=feats, return_model=True)
+    pp = pp[pp["PlateLocSide"].notna() & pp["PlateLocHeight"].notna()].copy()
+    # The group's graded season sets the scale and the reference population; the
+    # display type's rows are the subset a coach sees under this tag.
+    season_group = pp[pp["year"] == season_year].copy()
+    season = season_group[display_mask.reindex(season_group.index).fillna(False).astype(bool)].copy()
+
+    per_pitcher = season_group.groupby("PitcherId")["ridge_pred"].agg(["size", "mean"])
     mu, sd = display_scale(per_pitcher["mean"].values, (per_pitcher["size"] >= floor_n).values)
 
     # Adjusted results for THIS pitch type, scaled on this type's own qualified
@@ -333,8 +381,8 @@ def fit_type(pit: pd.DataFrame, tags: set[str] | None, floor_n: int, fc_module, 
     # though: script 09 measured the criterion's own year-over-year reliability
     # at 0.304 for four-seams against 0.174 slider and 0.181 changeup.
     adj_mu = adj_sd = None
-    if "adjT" in season.columns and season["adjT"].notna().any():
-        per_adj = season.groupby("PitcherId")["adjT"].agg(["size", "mean"])
+    if "adjT" in season_group.columns and season_group["adjT"].notna().any():
+        per_adj = season_group.groupby("PitcherId")["adjT"].agg(["size", "mean"])
         try:
             adj_mu, adj_sd = display_scale(per_adj["mean"].values,
                                            (per_adj["size"] >= floor_n).values)
@@ -345,14 +393,18 @@ def fit_type(pit: pd.DataFrame, tags: set[str] | None, floor_n: int, fc_module, 
 
     scaler = model.named_steps["standardscaler"]
     coef = model.named_steps["ridge"].coef_
-    feats = fc_module.FEATS
     qualified = per_pitcher.index[per_pitcher["size"] >= floor_n]
-    feature_means = season.groupby("PitcherId")[feats].mean()
-    population_mean_z = ((feature_means.loc[qualified].values - scaler.mean_) / scaler.scale_).mean(axis=0)
+    # Reference population over every REPORTED feature (the browser shows a
+    # percentile for each), but the population's mean z only over the model's own
+    # features, since that is the baseline the coefficients are applied against.
+    feature_means = season_group.groupby("PitcherId")[report_feats].mean()
+    population_mean_z = ((feature_means.loc[qualified, feats].values - scaler.mean_) / scaler.scale_).mean(axis=0)
 
     return {
         "pitches": season,
         "model": model,
+        "model_group": group,
+        "feats": list(feats),
         "scaler_mean": scaler.mean_,
         "scaler_scale": scaler.scale_,
         "coef": coef,

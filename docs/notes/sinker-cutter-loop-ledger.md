@@ -185,3 +185,10 @@ pre-registered candidate for the 2026→2027 pair and read it once, blind, when 
 exists; at the current effect size the doubled panel should clear 0.95 if the effect is
 real. Whether a sinker grade that leans on four-seam differentials is the grade Jack wants
 coached is his call to make before then, not after the number comes in.
+
+### Construct decision — 2026-09-10
+
+Jack ruled that a sinker grade that leans on four-seam differentials is acceptable. The
+2026-08-17 exclusion is lifted for the sinker; `pooled_all` is a legitimate candidate, not a
+caveated one. Next: change the learning target (xT, then decomposed outcomes), not the
+feature list, on the frozen gate.

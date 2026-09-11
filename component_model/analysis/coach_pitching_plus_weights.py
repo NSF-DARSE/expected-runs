@@ -65,6 +65,20 @@ SIX THINGS A CONSUMER OF THIS FILE MUST HONOUR:
      will be read as a second opinion rather than as noise. The app implements the ruling
      (isStuffPlusConfirmed, src/lib/pitchingPlusMix.ts) and this contract now states it, so a
      consumer reading only this file does not reintroduce the display that was removed.
+     ONE EXCEPTION, item 7.
+  7. A PROVISIONAL TYPE SHOWS ITS STUFF+ WITH A DRAFT NOTE, BY RULING, NOT BY VERDICT. From
+     v4 a pitch type may carry a "provisional" block. It is hand-set in PROVISIONAL below,
+     never computed, and records who ruled, when, and the exact note a coach must see. Jack
+     ruled on 2026-09-11 that the pooled sinker model (fair_criterion.ridge_for_group;
+     P=0.89 against the 0.95 bar on the 2025->2026 pair, every construction exhausted, see
+     docs/notes/sinker-cutter-loop-ledger.md) ships to coaches as a DRAFTED grade so the staff
+     can sense-check it before the blind 2026->2027 read, which is the read that decides it.
+     Full styling, same composite and staff-board treatment as a confirmed type, with the
+     note on every Stuff+ cell and on the composite. "composite_eligible" stays the gate's
+     verdict (false) so nobody reads the ruling as a pass; "display_eligible" is what a
+     consumer gates on, and is true when either the gate passed or a ruling stands. The block
+     drops itself the moment the gate passes, and a ruling for a type the gate has never
+     measured is refused at build time: a draft note presumes there was a draft.
 
 KNOWN LIMITATION, now load-bearing. reliability_curves.optimal_blend takes each off-diagonal
 of Sigma as Cov(a_i, a_j) alone, i.e. it assumes same-season cross-component noise is
@@ -108,7 +122,23 @@ COMPONENTS = [("stuff", "ridge_pred", "Stuff+"),
               ("results", "adjT", "Recent results")]
 LOC_TYPES = {"FF"}          # see limitation 1 in the docstring
 N_GRID = [10, 15, 20, 30, 40, 60, 80, 120, 175, 250, 350, 500, 750, 1000, 1500, 2500]
-CONTRACT_VERSION = 3   # v3: an ineligible type withholds its Stuff+, not just the blend
+CONTRACT_VERSION = 4   # v4: a hand-ruled provisional type shows its Stuff+ with a draft note
+
+# Types shown to coaches by ruling despite a failed gate (docstring item 7). Hand-set, one
+# entry per ruling, with the note verbatim as it must appear. Remove the entry to take the
+# grade down; the gate passing removes it on its own. Never add an entry without a ruling
+# recorded in the ledger.
+PROVISIONAL = {
+    "SI": {
+        "ruled_on": "2026-09-11",
+        "ruled_by": "Jack Davis",
+        "model": "pooled_all",
+        "decides": "blind read on the 2026->2027 pair; comes down if it fails",
+        "note": ("Drafted grade. The sinker Stuff+ model is still being refined and requires "
+                 "coach feedback and additional data before it is finalized."),
+        "composite": "included",
+    },
+}
 
 
 def cli():
@@ -194,19 +224,46 @@ def eligibility(grp, gate, meta):
             "p_gain_positive": row.get("p_gain_positive"),
             "p_semipartial_positive": row.get("p_semipartial_positive"),
             "blend_gain": row.get("blend_gain"),
-            "pass_bar": meta.get("pass_bar")}
+            "pass_bar": meta.get("pass_bar"),
+            "model": row.get("model", "own")}
     if row.get("verdict") == "PASS":
-        return {"composite_eligible": True, "composite_ineligible_reason": None, "gate": seen}
+        return {"composite_eligible": True, "composite_ineligible_reason": None, "gate": seen,
+                "provisional": None, "display_eligible": True}
     p, bar = row.get("p_gain_positive"), meta.get("pass_bar")
     detail = ("" if p is None or bar is None
               else " (%.0f%% confident it helps, against a %.0f%% bar)"
                    % (100 * p, 100 * bar))
+    prov = provisional(grp, gate)
     return {"composite_eligible": False,
             "composite_ineligible_reason":
                 "Stuff+ has not been shown to add anything for this pitch type beyond what "
                 "the pitcher's own recent results already say%s, so it is withheld rather "
                 "than shown alongside them." % detail,
-            "gate": seen}
+            "gate": seen,
+            "provisional": prov,
+            "display_eligible": prov is not None}
+
+
+def provisional(grp, gate):
+    """The PROVISIONAL ruling for a type that FAILED the gate, or None (docstring item 7).
+
+    Refuses a ruling on a type the gate never measured: the note tells a coach the grade is a
+    draft of a model being refined, which presumes a measured draft exists. A ruling on a
+    type that PASSED is never reached (eligibility returns before calling this) and would be
+    wrong anyway, since the note would talk down a confirmed grade.
+    """
+    entry = PROVISIONAL.get(grp)
+    if entry is None:
+        return None
+    row = (gate or {}).get(grp)
+    if not isinstance(row, dict) or "verdict" not in row:
+        raise RuntimeError("PROVISIONAL ruling for %r but the gate never measured it; a draft "
+                           "note presumes a measured draft" % grp)
+    if row.get("model", "own") != entry["model"]:
+        raise RuntimeError("PROVISIONAL ruling for %r names model %r but the gate row measured "
+                           "%r; rerun coach_incremental_gate.py so the row is the shipped grade"
+                           % (grp, entry["model"], row.get("model", "own")))
+    return dict(entry)
 
 
 def load_seasons(paths):
@@ -235,7 +292,7 @@ def load_seasons(paths):
 
 def graded_frame(df, grp, lmap):
     """One pitch type, with ridge_pred and (four-seams only) loc attached."""
-    ff = fc.stuff_ridge(df, pitch_mask=fc.pitch_mask(df, grp), feats=fc.feats_for(grp))
+    ff, _model, _feats = fc.ridge_for_group(df, grp)
     ff = ff[ff["xT"].notna()].copy()
     if grp in LOC_TYPES:
         fc.add_loc_bins(ff)
@@ -466,10 +523,17 @@ def main() -> int:
                "estimate hit the non-negative boundary: its 'component_r2' is an UPPER "
                "BOUND, not a point estimate, and must not be shown as a precise figure. "
                "The weights themselves are conservative under the clamp.",
-               "Gate on by_pitch[t]['composite_eligible'] before showing any blended score. "
-               "It is false for a type whose Stuff+ never cleared the incremental-validity "
-               "bar, and false for EVERY type when the gate file could not be read, so an "
-               "absent gate withholds composites rather than allowing them.",
+               "Gate on by_pitch[t]['display_eligible'] before showing a Stuff+ or a blended "
+               "score. It is true when the gate passed (composite_eligible) OR a hand ruling "
+               "stands (provisional is non-null), and false for EVERY type when the gate file "
+               "could not be read, so an absent gate withholds rather than allows. "
+               "composite_eligible alone is the gate's verdict and stays false for a "
+               "provisional type; never present a provisional type as confirmed.",
+               "A provisional type (by_pitch[t]['provisional'] non-null) shows its Stuff+ and "
+               "its blend with FULL styling, ranks on the staff board like any other, and "
+               "carries provisional['note'] verbatim as a tooltip on every Stuff+ cell and on "
+               "the composite. Do not mute it, badge it, or drop it from ordering: the ruling "
+               "is that coaches see the grade as a grade and read the note.",
                "An ineligible type shows NO Stuff+ -- not the blend and not the component "
                "on its own. Show its other components (Location+ where present, recent "
                "results) with the sample each one has. Withholding only the blend and "
@@ -481,6 +545,9 @@ def main() -> int:
                "was written to withhold."],
            "n_grid": N_GRID, "by_pitch": {}}
 
+    for grp in PROVISIONAL:
+        if grp not in ORDER:
+            sys.exit("PROVISIONAL names %r, which this script does not grade" % grp)
     for grp in ORDER:
         try:
             row = per_type(graded_frame(df, grp, lmap), grp, args, rng)

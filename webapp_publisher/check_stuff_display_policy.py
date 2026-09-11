@@ -1,12 +1,16 @@
-"""Does a bundle ship Stuff+ only for the pitch types confirmed to earn one?
+"""Does a bundle ship Stuff+ only for the pitch types allowed to show one?
 
 THE POLICY THIS ENFORCES. Jack ruled on 2026-08-20 that a per-pitch-type Stuff+ reaches a
 coach only where the incremental-validity gate confirms Stuff+ adds something the pitcher's own
-recent results do not already say. Confirmed today: FF, Slider, Curveball, ChangeUp. Withheld:
-Sinker (29% confident against a 95% bar), Cutter (78%), Splitter (never tested, no contract
-entry at all). The confirmed set is NOT hardcoded here -- it is read from
-coach_pitching_plus_weights.json's composite_eligible, so re-running the gate moves this
-check's target the same way it moves the app's.
+recent results do not already say. On 2026-09-11 he added one ruled exception: a type may show
+a PROVISIONAL Stuff+, with a draft note, when the contract carries a hand-set ruling for it
+(contract v4, docstring item 7 of coach_pitching_plus_weights.py). Confirmed today: FF, Slider,
+Curveball, ChangeUp. Provisional: Sinker (89% against a 95% bar, pooled model, shown for coach
+sense-checking until the blind 2027 read). Withheld: Cutter (78%), Splitter (never tested, no
+contract entry at all). The allowed set is NOT hardcoded here -- it is read from
+coach_pitching_plus_weights.json's display_eligible (v4) or composite_eligible (v3), so
+re-running the gate or lifting the ruling moves this check's target the same way it moves the
+app's.
 
 WHAT IT IS FOR, and why it does not go green. The live app enforces this at DISPLAY time
 (isStuffPlusConfirmed in src/lib/pitchingPlusMix.ts, app repo). The publisher does not: the
@@ -99,8 +103,14 @@ def confirmed_types(contract_path):
             continue
         entry = by_pitch.get(contract_type)
         # `is True`, not truthiness: a corrupted contract shipping a string or a 1 must read as
-        # unconfirmed. Same rule the app's isCompositeEligible uses.
-        if isinstance(entry, dict) and entry.get("composite_eligible") is True:
+        # unconfirmed. Same rule the app's isCompositeEligible uses. A v4 contract says which
+        # types may show through display_eligible (gate pass OR standing ruling); a v3 contract
+        # has only composite_eligible. Read the v4 key when present so a ruled type is not
+        # reported as a violation, and never fall through from a v4 false to the v3 key.
+        if not isinstance(entry, dict):
+            continue
+        key = "display_eligible" if "display_eligible" in entry else "composite_eligible"
+        if entry.get(key) is True:
             ok.add(bundle_type)
     return ok, 0
 
@@ -250,7 +260,7 @@ def main() -> int:
                          "deployed', which is the one failure this check must never report as "
                          "clean.")
     ap.add_argument("--contract", required=True,
-                    help="coach_pitching_plus_weights.json. Its composite_eligible flags ARE "
+                    help="coach_pitching_plus_weights.json. Its display_eligible flags ARE "
                          "the policy; an unreadable one confirms nothing.")
     a = ap.parse_args()
     try:

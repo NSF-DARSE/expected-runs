@@ -29,6 +29,12 @@ pitch type passes when P(blend gain > 0) >= 0.95. Pre-registered before the run:
 that statistic, on the usage-share pool, for every pitch type with enough sample -- not
 chosen after seeing which types looked good.
 
+Each row measures the grade that SHIPS for its type (fair_criterion.ridge_for_group). From
+2026-09-10 the sinker's is the pooled four-seam+sinker ridge, so its train set and bootstrap
+span both groups; the row says so ("model": "pooled_all"). The bar, statistic, pool and
+bootstrap are unchanged. The sinker's own-model row (P=0.29) is preserved in
+coach_incremental_gate_pre_pooled_2026-09-11.json in the workdir, not in this output.
+
 Data rules: reads workdir caches only; writes one JSON to the score workdir. No pitcher
 names, no per-pitcher output, no absolute paths -- see fair_criterion.workdirs().
 """
@@ -93,15 +99,21 @@ def main() -> int:
             print("")
             print("=== %s: skipped, no usable train year ===" % grp)
             continue
-        feats = fc.feats_for(grp)
-        base = score[ms].copy()
-        base["RelSide_arm"] = base["RelSide"] * (1 - 2 * base["is_lhp"])
-        base["HorzBreak_arm"] = base["HorzBreak"] * (1 - 2 * base["is_lhp"])
-        for o, s_ in fc.DEV_SRC.items():
-            base[o] = (base[s_] - base["is_lhp"].map(fc.DEV_CENTRES[o])).abs()
+        # The row measures the grade that SHIPS for the group. For a POOLED_GROUPS member
+        # (the sinker, from 2026-09-10) that is the pooled four-seam+sinker ridge, so the
+        # train set is both groups' rows and the bootstrap resamples pitchers across both,
+        # exactly as coach_si_pooled_gate.py "pooled_all" measured it. Evaluation rows are
+        # always the group's own pitches. Everything else about the gate is unchanged.
+        pooled = grp in fc.POOLED_GROUPS
+        if pooled:
+            feats = list(fc.SI_POOLED_TRAIN_FEATS)
+            base = fc.add_derived_feats(score[score["is_ff"] | ms].copy())
+        else:
+            feats = fc.feats_for(grp)
+            base = fc.add_derived_feats(score[ms].copy())
         base = base.dropna(subset=feats + ["Target"])
         tr = base[(base["year"] == 2024) & base["Target"].notna()]
-        ev = base[base["year"] == 2025]
+        ev = base[(base["year"] == 2025) & (ms.reindex(base.index).fillna(False).astype(bool))]
 
         c = crit[fc.pitch_mask(crit, grp) & (crit["year"] == 2025)]
         k = c.groupby("PitcherId").agg(cn=("adjT", "size"), crit=("adjT", "mean")).join(ctot)
@@ -122,8 +134,8 @@ def main() -> int:
 
         j = build(tr, ev)
         print("")
-        print("=== %s  tags %s  n=%d pitchers ===" % (grp, sorted(fc.PITCH_GROUPS[grp]),
-                                                      len(j)))
+        print("=== %s  tags %s  n=%d pitchers%s ===" % (grp, sorted(fc.PITCH_GROUPS[grp]),
+                                                        len(j), "  [pooled model]" if pooled else ""))
         if len(j) < MIN_PITCHERS:
             print("    too few pitchers on the share pool to gate")
             out["by_pitch"][grp] = {"n": int(len(j)), "skipped": "pool too small"}
@@ -166,7 +178,8 @@ def main() -> int:
             "gain_ci": [round(float(lo), 4), round(float(hi), 4)],
             "p_gain_positive": p_gain,
             "p_semipartial_positive": float((sps > 0).mean()),
-            "verdict": verdict}
+            "verdict": verdict,
+            "model": "pooled_all" if pooled else "own"}
 
     dest = os.path.join(SCORE_WORKDIR, "coach_incremental_gate.json")
     with open(dest, "w") as fh:

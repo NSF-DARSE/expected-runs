@@ -326,7 +326,8 @@ def fit_type(pit: pd.DataFrame, tags: set[str] | None, floor_n: int, fc_module, 
     """Fit the ridge for one pitch type and derive its display scale.
 
     Protocol from build_portal_data.py (arsenal grade, adopted 2026-07-23): one
-    ridge per pitch type via fc.stuff_ridge, then a display scale from that
+    ridge per pitch type via fc.stuff_ridge (or fc.ridge_for_group for a group whose
+    shipped model is pooled, fc.POOLED_GROUPS), then a display scale from that
     type's qualifying pitchers.
 
     group names the fair_criterion model group (fc.PITCH_GROUPS / FEATS_BY_PITCH
@@ -352,6 +353,8 @@ def fit_type(pit: pd.DataFrame, tags: set[str] | None, floor_n: int, fc_module, 
     if group is None:
         train_mask, feats = display_mask, list(fc_module.FEATS)
     else:
+        # For a POOLED_GROUPS member this is the group's OWN list, used only for the
+        # display-tag containment check below; the shipped list replaces it after the fit.
         feats = fc_module.feats_for(group)
         # FF keeps the is_ff flag as its mask so the three four-seam spellings and
         # the group definition cannot drift apart on this path.
@@ -363,7 +366,15 @@ def fit_type(pit: pd.DataFrame, tags: set[str] | None, floor_n: int, fc_module, 
     if missing:
         raise ValueError(f"report_feats must cover the model's own features; missing {missing}")
 
-    pp, model = fc_module.stuff_ridge(pit, pitch_mask=train_mask, feats=feats, return_model=True)
+    if group in getattr(fc_module, "POOLED_GROUPS", set()):
+        # The shipped model for this group is not its own ridge (fair_criterion, POOLED_GROUPS
+        # note). ridge_for_group returns the collapsed equivalent over its published list.
+        pp, model, feats = fc_module.ridge_for_group(pit, group)
+        missing = [f for f in feats if f not in report_feats]
+        if missing:
+            raise ValueError(f"report_feats must cover the model's own features; missing {missing}")
+    else:
+        pp, model = fc_module.stuff_ridge(pit, pitch_mask=train_mask, feats=feats, return_model=True)
     pp = pp[pp["PlateLocSide"].notna() & pp["PlateLocHeight"].notna()].copy()
     # The group's graded season sets the scale and the reference population; the
     # display type's rows are the subset a coach sees under this tag.

@@ -41,6 +41,18 @@ SAMPLE_FLOOR = 100
 # pitcher page read from here; the display scale keeps SAMPLE_FLOOR.
 STUFF_FLAG_FLOOR = {"FF": 15, "SI": 15, "FC": 10, "SL": 10, "CB": 10, "CH": 10}
 MIN_TYPE_PITCHES = 25   # skip a pitch type for a pitcher below this
+
+# A single pitch whose displayed Stuff+ lands outside this band is a TRACKING outlier, not
+# a grade: the pooled sinker model carries a squared movement-angle term, and a "sinker"
+# tracked at 178 degrees (break pointing straight down, 4 inches of it, 82 mph) is a
+# mis-read that the quadratic extrapolates to 255. One D1 sinker in ten thousand sits
+# past 170 degrees. Such a pitch is left OUT of the per-pitch list (the plot and the
+# waterfall) and counted in the build log; the season aggregate is untouched, since a
+# model is graded on every pitch it was measured on and one pitch in a season mean is a
+# fraction of a point. The band matches webapp_publisher/schema.py PITCH_GRADE_BAND,
+# which would otherwise refuse the bundle. Widening it there instead would blunt the
+# check whose job is to catch a raw run value shipped bare.
+PITCH_DISPLAY_BAND = (-100.0, 250.0)
 SEASON_ROLE_YEAR = 2025  # fair_criterion relabels the year pair to 2024/2025 roles
 
 # Floor per 30-day window for RAW physical trend metrics (velo, break). Raw
@@ -130,6 +142,7 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
         all_ids.update(state["pitches"]["PitcherId"].unique())
 
     records = []
+    dropped_outliers: dict[str, int] = {}
     for pid in sorted(all_ids):
         # First pass: which types clear the per-type minimum for this pitcher.
         # Usage is shared out over the INCLUDED types only, so the shares always
@@ -230,7 +243,11 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
             loc_grades = (ar.to_display(sub["loc"].values, state["loc_pitch_mu"], state["loc_pitch_sd"])
                           if tname == "FF" else [None] * len(sub))
             dates = pd.to_datetime(sub["Date"]).dt.strftime("%Y-%m-%d").values
+            lo, hi = PITCH_DISPLAY_BAND
             for (_, p), g, lg, d in zip(sub.iterrows(), grades, loc_grades, dates):
+                if not lo <= float(g) <= hi:
+                    dropped_outliers[tname] = dropped_outliers.get(tname, 0) + 1
+                    continue
                 row = {
                     "d": str(d), "t": tname,
                     "x": round(float(p["PlateLocSide"]), 3),
@@ -262,6 +279,9 @@ def build_pitcher_records(fitted_by_type: dict, feats: list[str], floor_n: int, 
         arsenal_rows.sort(key=lambda r: -r["usage"])
         records.append({"pitcherId": int(pid), "name": name, "hand": hand,
                         "arsenal": arsenal_rows, "outings": outings, "pitches": pitch_rows})
+    for tname, n in sorted(dropped_outliers.items()):
+        print(f"{tname}: {n} pitch(es) left off the per-pitch list, displayed grade outside "
+              f"{PITCH_DISPLAY_BAND[0]:g}..{PITCH_DISPLAY_BAND[1]:g} (tracking outlier)")
     return records
 
 

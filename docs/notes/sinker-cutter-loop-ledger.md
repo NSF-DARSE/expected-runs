@@ -241,3 +241,42 @@ app withheld the whole panel for unconfirmed types. It now shows Value and Perce
 the sinker (and cutter) with no Stuff+ points, no colour, no direction claim and no
 total. App branch `descriptive-traits`. Display policy is unchanged: no plus number until
 the gate passes.
+
+### Provisional-grade ruling — 2026-09-11
+
+Jack overrode exit B the next morning: the pooled sinker grade ships to coaches as a
+DRAFTED grade so the staff can sense-check it before the blind 2027 read. His reasoning is
+that the four-seam's clean pass at n=2007 raises the prior that fastball physics carries
+to the sinker, that P=0.89 on a 272-pitcher panel is a sample problem rather than a signal
+problem, and that coach perspective on the sinker-primary arms is data the gate cannot
+give us. The risks were put to him (anchoring on a grade that may come down, stickiness of
+a shipped number, the ruling leaking into how the 2027 read is interpreted) and he took
+them. Rulings, verbatim where it matters:
+
+1. Full styling with a tooltip only. No muted style, no "Provisional" label.
+2. The trait panel shows the full table, Worth column included.
+3. Not excluded from the composite Pitching+ or from staff-board ordering. The composite
+   carries a tooltip saying a drafted sinker grade is included.
+4. Tooltip text: "Drafted grade. The sinker Stuff+ model is still being refined and
+   requires coach feedback and additional data before it is finalized."
+
+**What ships.** The `pooled_all` construction, collapsed to a 17-feature linear model on
+sinker rows (`fair_criterion.pooled_si_ridge`; equality with the pooled ridge is asserted
+at fit time and unit-tested). `fair_criterion.ridge_for_group` is the one place that says
+the sinker's shipped model is not `FEATS_BY_PITCH["SI"]`; every coach-facing path
+(arsenal.fit_type, the weights contract, the season floor, the official gate row) grades
+through it. `FEATS_BY_PITCH["SI"]` stays as the August loop measured it.
+
+**What the gate says.** The official gate row for the sinker was rerun on the shipped
+grade (pooled model, bootstrap resampling pitchers across four-seams and sinkers). Its
+verdict is recorded in `coach_incremental_gate.json` with `"model": "pooled_all"` and
+stays "no": the ruling is not a pass and the contract does not present it as one.
+
+**Contract.** v4 of `coach_pitching_plus_weights.py` adds a hand-set `PROVISIONAL` entry
+for SI (ruling date, model, note, composite inclusion) and a per-type `display_eligible`
+flag. `composite_eligible` remains the gate verdict. The entry drops itself when the gate
+passes, and refuses to build if the gate row does not measure the model it names.
+
+**Blind read unchanged.** One read on the 2026→2027 pair, same gate, same bar. If it
+fails, the `PROVISIONAL` entry is removed and the grade comes down. The ruling changes
+what coaches see in the meantime; it does not change what counts as evidence.

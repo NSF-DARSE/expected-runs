@@ -34,6 +34,17 @@ FEATURE_LABELS = {
     # unusually high and an unusually low release both score as deviation.
     "dev_relheight": "Release height, deviation from typical",
     "dev_relside": "Release side, deviation from typical",
+    # Added 2026-09-11 with the pooled sinker model (fair_criterion.SI_FEATS). The
+    # movement rows describe the break vector as a whole; the "secondary sinker" rows
+    # are the fastball differentials, live only for a sinker thrown alongside a
+    # four-seam and exactly zero otherwise, so they must not read as the plain ones.
+    "mov_angle": "Movement direction",
+    "mov_mag": "Total movement",
+    "mov_angle_sq": "Movement direction, curvature",
+    "is_secondary_si": "Thrown alongside a four-seam",
+    "vertbreakdiff_sec": "Vertical break vs his four-seam, when he throws one",
+    "horzbreakdiff_sec": "Horizontal break vs his four-seam, when he throws one",
+    "velocity_differential_sec": "Velo vs his four-seam, when he throws one",
 }
 
 PITCH_TYPE_LABELS = {

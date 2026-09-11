@@ -69,8 +69,7 @@ def main() -> int:
         m = fc.pitch_mask(score, grp)
         if int((m & (score["year"] == 2024)).sum()) < 2000:
             continue
-        ff, _ = fc.stuff_ridge(score, return_model=True, pitch_mask=m,
-                               feats=fc.feats_for(grp))
+        ff, _model, _feats = fc.ridge_for_group(score, grp)
         ev = ff[ff["year"] == 2025]
         s = ev.groupby("PitcherId").agg(sn=("adjT", "size"), grade=("ridge_pred", "mean"),
                                         prior=("adjT", "mean")).join(score_tot)

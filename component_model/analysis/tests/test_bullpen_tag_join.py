@@ -51,7 +51,7 @@ def _pitch_df(n, start=BASE_T, cadence=CADENCE, start_pitch_no=1, level="TeamExc
             "Time": t.strftime("%H:%M:%S.%f")[:-4],
             "UTCDateTime": t.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
             "PitchUID": f"uid-{pitch_no}",
-            "PitcherId": 823910,
+            "PitcherId": 900001,
             "AutoPitchType": "Fastball",
             "RelSpeed": 90.0,
             "PlateLocSide": 0.0,
@@ -65,10 +65,10 @@ def _iso(t):
     return t.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
-def _session(tags, session_id="2026-08-18__823910__T104231Z"):
+def _session(tags, session_id="2026-08-18__900001__T104231Z"):
     return {
-        "sessionId": session_id, "pitcherId": "823910",
-        "pitcherName": "Callaway, Andrew", "date": "2026-08-18",
+        "sessionId": session_id, "pitcherId": "900001",
+        "pitcherName": "Test-Pitcher, Alpha", "date": "2026-08-18",
         "tags": tags,
     }
 

@@ -42,6 +42,11 @@ RAW_COLS = [
     "RelHeight", "RelSide", "VertBreak", "PlateLocHeight", "PlateLocSide",
     "ExitSpeed", "Angle", "Direction", "Distance", "HangTime",
     "GameID", "PitchUID", "Level", "League",
+    # Appended, not inserted, so every existing column keeps its position. The
+    # per-pitch UTC timestamp is what lets a bullpen's intended-zone tags be
+    # time-anchored to its pitches (component_model/analysis/bullpen_tag_join.py);
+    # without it an API-pulled pen cannot be joined at all.
+    "UTCDateTime",
 ]
 
 
@@ -143,6 +148,7 @@ def flatten_game(session: dict, plays: list[dict], balls: list[dict]) -> pd.Data
             "PitchUID": play.get("pitchUID"),
             "Level": level,
             "League": league,
+            "UTCDateTime": play.get("utcDateTime"),
         })
 
     df = pd.DataFrame(rows, columns=RAW_COLS)

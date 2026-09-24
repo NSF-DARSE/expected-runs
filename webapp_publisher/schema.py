@@ -392,3 +392,49 @@ def validate_pitcher_bundle(files: dict) -> None:
                     )
         _check_scaled_spread([p["g"] for p in body["pitches"] if p.get("g") is not None],
                              key=key, field="pitch grade (g)")
+
+
+REQUIRED_COMMAND_KEYS = {"version", "context", "nSessions", "nJoined", "sessions"}
+REQUIRED_COMMAND_SESSION_KEYS = {"sessionId", "pitcherId", "date", "status", "reason",
+                                 "pairs", "nTags", "nSkipped", "throws", "batterSide",
+                                 "pitcherMatch"}
+REQUIRED_COMMAND_PAIR_KEYS = {"seq", "zone", "pitchClass", "side", "height"}
+
+
+def validate_command_pairs(payload: dict) -> None:
+    """command_pairs.json: the per-pitch inputs the app scores Command+ from.
+
+    The app does the scoring, so what matters here is that every pair is scorable
+    or honestly null: a zone it knows, a pitch class zone 5 can resolve against,
+    and a location that is a number or absent -- never a string or a NaN.
+    """
+    missing = REQUIRED_COMMAND_KEYS - set(payload)
+    if missing:
+        raise ValueError(f"command_pairs.json missing {missing}")
+    if payload["context"] != "bullpen":
+        raise ValueError("command_pairs.json must be marked context 'bullpen'")
+    for s in payload["sessions"]:
+        missing = REQUIRED_COMMAND_SESSION_KEYS - set(s)
+        if missing:
+            raise ValueError(f"command session {s.get('sessionId')} missing {missing}")
+        if s["status"] not in ("joined", "unjoined"):
+            raise ValueError(f"command session {s['sessionId']} has status {s['status']!r}")
+        if s["status"] == "unjoined" and (s["pairs"] or not s["reason"]):
+            raise ValueError(f"unjoined command session {s['sessionId']} must carry a reason "
+                             "and no pairs")
+        for k in ("throws", "batterSide"):
+            if s[k] not in (None, "Left", "Right"):
+                raise ValueError(f"command session {s['sessionId']} has {k} {s[k]!r}")
+        for p in s["pairs"]:
+            missing = REQUIRED_COMMAND_PAIR_KEYS - set(p)
+            if missing:
+                raise ValueError(f"command pair in {s['sessionId']} missing {missing}")
+            if p["zone"] not in (1, 2, 3, 4, 5):
+                raise ValueError(f"command pair in {s['sessionId']} has zone {p['zone']!r}")
+            if p["pitchClass"] not in ("fastball", "offspeed"):
+                raise ValueError(f"command pair in {s['sessionId']} has pitchClass "
+                                 f"{p['pitchClass']!r}")
+            for k in ("side", "height"):
+                v = p[k]
+                if v is not None and (not isinstance(v, (int, float)) or v != v):
+                    raise ValueError(f"command pair in {s['sessionId']} has non-numeric {k}")

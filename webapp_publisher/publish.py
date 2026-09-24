@@ -13,7 +13,8 @@ from webapp_publisher.build_pitcher_bundle import (
     build_pitcher_bundle, enrich_loc_where, enrich_stuff_attr_detail, pitcher_index,
     stamp_pitcher_ids,
 )
-from webapp_publisher.schema import validate_bundle, validate_pitcher_bundle
+from webapp_publisher.build_command_bundle import build_command_section, resolve_tags_dir
+from webapp_publisher.schema import validate_bundle, validate_command_pairs, validate_pitcher_bundle
 from webapp_publisher.upload import upload_bundle
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
@@ -151,6 +152,15 @@ def main() -> int:
                     help="Train,eval season pair, e.g. 2025,2026. Falls back to "
                          "STUFFPLUS_YEARS. Required: not defaulted, because a bundle "
                          "built for the wrong seasons renders normally.")
+    ap.add_argument("--tags-dir", default=os.environ.get("COMMAND_TAGS_DIR"),
+                    help="Local mirror of the api's session-tags container, for Command+.")
+    ap.add_argument("--pitch-roots", default=os.environ.get("COMMAND_PITCH_ROOTS"),
+                    help="os.pathsep-separated roots of dated TrackMan practice CSVs "
+                         "(with UTCDateTime) that the tags are joined against.")
+    ap.add_argument("--pull-tags", action="store_true",
+                    default=os.environ.get("COMMAND_PULL_TAGS") == "1",
+                    help="Mirror the session-tags container before building Command+ "
+                         "(read-only; uses WEBAPP_STORAGE_CONNECTION_STRING).")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
     if not args.data or not args.workdir:
@@ -172,6 +182,14 @@ def main() -> int:
     enrich_loc_where(bundle, pages)
     bundle.update(pitcher_files)
     validate_bundle(bundle)
+
+    command = build_command_section(
+        tags_dir=resolve_tags_dir(args.tags_dir, args.workdir, args.pull_tags),
+        pitch_roots=args.pitch_roots, pull=args.pull_tags,
+        connection_string=os.environ.get("WEBAPP_STORAGE_CONNECTION_STRING"),
+        container=os.environ.get("COMMAND_TAGS_CONTAINER", "session-tags"))
+    validate_command_pairs(command)
+    bundle["command_pairs.json"] = command
 
     if args.dry_run:
         out = pathlib.Path(args.workdir) / "bundle"

@@ -129,3 +129,28 @@ python -m pytest webapp_publisher/tests/ -v
 
 `test_upload.py` injects a fake `upload_fn` so the test suite never touches
 real Azure Blob storage or requires credentials.
+
+## Command+ (bullpen execution)
+
+The bundle also ships `command_pairs.json`: every tagged bullpen pitch joined to
+its TrackMan location (intended zone, the tag's pitch class, PlateLocSide /
+PlateLocHeight) plus the session's recorded PitcherThrows and BatterSide. The app
+scores Command+ from these pairs and the coach's settings, so editing a target or
+band in the app needs no republish. Built by
+`component_model/analysis/command_pairs.py` on top of `bullpen_tag_join.py`; no
+pitcher names are written.
+
+Inputs, all optional (a publish without them ships an empty section with a note):
+
+- `COMMAND_TAGS_DIR`: a local mirror of the app api's `session-tags` container,
+  same layout (`<date>/<pitcherId>/<sessionId>.json`).
+- `COMMAND_PULL_TAGS=1` (or `--pull-tags`): mirror that container first,
+  read-only, using `WEBAPP_STORAGE_CONNECTION_STRING`, into `COMMAND_TAGS_DIR` or
+  `<workdir>/session_tags`. `COMMAND_TAGS_CONTAINER` overrides the name.
+- `COMMAND_PITCH_ROOTS`: `;`-separated roots of `<year>/<month>/<day>` TrackMan
+  practice CSVs. They must carry `UTCDateTime` to time-anchor the tags; API pulls
+  flattened before this change do not, and need re-pulling.
+
+Tags found with no `COMMAND_PITCH_ROOTS` stops the publish rather than shipping
+every session as unmatched. A session the join refuses ships as `unjoined` with
+its reason and no pairs.

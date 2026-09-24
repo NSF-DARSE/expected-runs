@@ -254,6 +254,35 @@ USECOLS = ["PitchUID", "Date", "Pitcher", "PitcherId", "PitcherThrows", "Pitcher
 # instead of failing the whole read.
 OPTIONAL_COLS = ["RelSpeed", "PlayResult"]
 
+# TrackMan's Level for bullpens and intrasquad scrimmages. Real games carry D1, D2,
+# D3, JUCO or NAIA. These rows may be DISPLAYED (Command+, bullpen Stuff+) but must
+# never train a model or enter a qualifying population: a pen has no hitter, no
+# outcome, and a velocity distribution that is not the game distribution.
+PRACTICE_LEVEL = "TeamExclusive"
+
+
+def exclude_practice(df, where="load_pitches"):
+    """Drop every Level == 'TeamExclusive' row, and say how many went.
+
+    Until 2026-09-24 practice rows stayed out of training only by accident: every
+    TeamExclusive capture is also `_unverified`, and the extract builder skips
+    unverified files. Relaxing that one rule would have let bullpens and
+    intrasquads flow into the ridge fits and the qualified panel with nothing
+    raised. This is the deliberate gate. It runs on every frame load_pitches
+    returns, cached or fresh, so an old cache cannot carry practice rows past it.
+    A frame without a Level column passes through unchanged.
+    """
+    if "Level" not in df.columns:
+        return df
+    practice = df["Level"] == PRACTICE_LEVEL
+    n = int(practice.sum())
+    if n:
+        print(f"*** PRACTICE GUARD ({where}): dropped {n} Level == "
+              f"{PRACTICE_LEVEL!r} rows; bullpens and intrasquads never train ***")
+        return df[~practice].copy()
+    return df
+
+
 RIDGE_ALPHA = 10
 
 # Shrinkage weight for the batter effect in add_adjusted: a batter with K pitches
@@ -400,11 +429,13 @@ def load_pitches(args):
         if not stale:
             # Re-checked on the cached frame too: a cache written before this
             # guard existed can carry the same season-wide gap.
+            cached = exclude_practice(cached, where="cached frame")
             check_feature_coverage(cached, pair)
             return cached
         print(f"*** CACHE REBUILD: {cache} predates {', '.join(stale)} ***")
     df = pd.read_csv(args.data, usecols=available)
     df = df.dropna(subset=["PitchUID"]).drop_duplicates(subset="PitchUID", keep="first")
+    df = exclude_practice(df)
     normalize_pitcher_names(df)
     df["year"] = pd.to_datetime(df["Date"], errors="coerce").dt.year
     df = df[df["year"].isin(pair)].copy()

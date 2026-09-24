@@ -120,7 +120,7 @@ def main() -> int:
     print("  frame ready in %.0fs" % (time.time() - t0))
 
     for grp in ORDER:
-        ff = fc.stuff_ridge(df, pitch_mask=fc.pitch_mask(df, grp), feats=fc.feats_for(grp))
+        ff, _model, _feats = fc.ridge_for_group(df, grp)
         ff = ff[ff["xT"].notna()].copy()
         base = panel(ff, min(FLOORS))
         if base.empty:

@@ -132,8 +132,7 @@ def reliability_curve(season: pd.DataFrame, value_col: str, min_half: int) -> di
 
 
 def stuff_frame(df: pd.DataFrame, group: str) -> pd.DataFrame:
-    mask = df["is_ff"] if group == "FF" else fc.pitch_mask(df, group)
-    graded = fc.stuff_ridge(df, pitch_mask=mask, feats=fc.feats_for(group))
+    graded, _model, _feats = fc.ridge_for_group(df, group)
     season = graded[graded["year"] == SEASON_ROLE_YEAR]
     return season[["PitcherId", "GameID", "Date", "ridge_pred"]]
 

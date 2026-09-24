@@ -1008,3 +1008,22 @@ def test_artifact_sample_floor_is_the_type_flag_floor():
     assert art["byPitchType"]["FF"]["sampleFloor"] == 15
     # Splitter rides the pooled CH group, so it carries the CH floor.
     assert art["byPitchType"]["Splitter"]["sampleFloor"] == mod.STUFF_FLAG_FLOOR["CH"] == 10
+
+
+def test_a_tracking_outlier_pitch_is_left_off_the_per_pitch_list_but_kept_in_the_mean():
+    """One mis-tracked pitch whose displayed grade falls outside PITCH_DISPLAY_BAND
+    (the pooled sinker's squared movement-angle term extrapolates a 178-degree
+    'sinker' to 255) is dropped from the plot/waterfall list and counted, while
+    the arsenal row's season grade still averages every graded pitch."""
+    mod = _load_pages_module()
+    feats, fitted = _fitted()
+    # sd 0.02 puts this one pitch at 100 + 15 * 0.30 / 0.02 = 325 on the display scale.
+    fitted["pitches"].loc[0, "ridge_pred"] = -0.30
+    records = mod.build_pitcher_records({"FF": fitted}, feats, floor_n=1, asof="2026-03-10",
+                                        min_type_pitches=1)
+    r1 = next(r for r in records if r["pitcherId"] == 1)
+    assert len(r1["pitches"]) == 2
+    assert all(mod.PITCH_DISPLAY_BAND[0] <= p["g"] <= mod.PITCH_DISPLAY_BAND[1]
+               for p in r1["pitches"])
+    expected = mod.ar.to_display(fitted["pitches"].loc[[0, 1, 2], "ridge_pred"].mean(), 0.0, 0.02)
+    assert r1["arsenal"][0]["stuff"] == pytest.approx(float(expected))

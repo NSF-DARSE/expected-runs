@@ -169,11 +169,10 @@ FEATS_BY_PITCH = {
     # No differentials: a four-seam IS the anchor, so its own differentials are ~0 by
     # construction, and they were dropped for interpretability in 114cae5.
     "FF": BASE_FEATS,
-    # No differentials either, per Jack 2026-08-17: a sinker is a fastball, you want both
-    # hard, and "slower than your fastball" is not a virtue you would coach into one. It
-    # still gets its OWN model, because release height is expected to invert against the
-    # four-seam -- a low slot means flat-to-the-top on a four-seam and steep-to-the-bottom
-    # on a sinker, both good, for opposite reasons.
+    # The sinker's OWN model, as the August loop and the official gate row measured it
+    # (P=0.29 against the 0.95 bar). No differentials, per Jack 2026-08-17: a sinker is a
+    # fastball, you want both hard. Kept as-is so those results stay reproducible. This is
+    # NOT the sinker that ships: see the pooled-sinker block below and ridge_for_group().
     "SI": BASE_FEATS,
     "SL": BASE_FEATS + DIFF_FEATS,
     "SW": BASE_FEATS + DIFF_FEATS,
@@ -186,13 +185,39 @@ FEATS_BY_PITCH = {
     "CH": [f for f in BASE_FEATS if f != "SpinRate"] + DIFF_FEATS,
 }
 
-# Every feature any per-type model uses, in one fixed order. This is the shipped
+# ---- the pooled sinker model (PROVISIONAL grade, Jack 2026-09-11) ----
+# The sinker that SHIPS is not FEATS_BY_PITCH["SI"], and ridge_for_group() is the single
+# place that says so. Its ridge is trained on four-seams AND sinkers together, so the
+# sinker's coefficients are shrunk toward the four-seam's instead of estimated from a
+# seventh of the data, with four slopes free to differ (SI_INTERACT), movement geometry
+# (MOVGEO_FEATS), and "versus own four-seam" differentials for the sinker that is a
+# SECONDARY fastball (SEC_FEATS: forced to exactly zero when the pitcher has no four-seam).
+# Jack lifted the 2026-08-17 differential exclusion for the sinker on 2026-09-10. On the
+# 2025->2026 pair it reads P=0.89 against the 0.95 bar; Jack ruled on 2026-09-11 that it
+# shows to coaches anyway as a DRAFTED grade, for sense-checking, and the contract carries
+# that ruling (coach_pitching_plus_weights.py, PROVISIONAL). It has ONE more read, blind,
+# on the 2026->2027 pair, and comes down if that fails. Ledger:
+# docs/notes/sinker-cutter-loop-ledger.md. Harness: coach_si_pooled_gate.py "pooled_all".
+SI_INTERACT = ["RelHeight", "InducedVertBreak", "HorzBreak_arm", "RelSpeed"]
+MOVGEO_FEATS = ["mov_angle", "mov_mag", "mov_angle_sq"]
+SEC_FEATS = ["is_secondary_si"] + [f"{c}_sec" for c in DIFF_FEATS]
+# What the pooled ridge is trained on (four-seam and sinker rows alike).
+SI_POOLED_TRAIN_FEATS = (BASE_FEATS + ["is_si"] + [f"si_x_{f}" for f in SI_INTERACT]
+                         + MOVGEO_FEATS + SEC_FEATS)
+# What a SINKER's grade is a linear function of once is_si = 1 is substituted: every
+# interaction folds into its base slope. This is the list the artifact publishes.
+SI_FEATS = BASE_FEATS + MOVGEO_FEATS + SEC_FEATS
+# Groups whose shipped model is not their own FEATS_BY_PITCH ridge.
+POOLED_GROUPS = {"SI"}
+
+# Every feature any SHIPPED per-type model uses, in one fixed order. This is the shipped
 # model.featureOrder for the pitcher pages (14_pitcher_pages.py): one positional
 # contract for the browser, with each type's coefficient padded to zero on the
-# features its own list leaves out. Every FEATS_BY_PITCH list is a subsequence of
-# it, so the padding is by name and never by position.
-UNION_FEATS = BASE_FEATS + DIFF_FEATS
+# features its own list leaves out. Every shipped list is a subsequence of it, so the
+# padding is by name and never by position.
+UNION_FEATS = BASE_FEATS + DIFF_FEATS + MOVGEO_FEATS + SEC_FEATS
 assert all(set(v) <= set(UNION_FEATS) for v in FEATS_BY_PITCH.values())
+assert set(SI_FEATS) <= set(UNION_FEATS)
 
 
 def pitch_mask(df, group):
@@ -581,24 +606,111 @@ def stuff_ridge(df, return_model=False, pitch_mask=None, feats=None):
     """
     mask = df["is_ff"] if pitch_mask is None else pitch_mask
     feats = list(FEATS) if feats is None else list(feats)
-    ff = df[mask].copy()
-    # Arm-side frame for the two handedness-mirrored geometry features (see FEATS note):
-    # one estimable slope per feature instead of a pooled average over two opposite
-    # relationships (RelSide: RHP -0.0019 vs LHP +0.0034, P=1.000 they differ; HorzBreak:
-    # RHP mean +10.6 vs LHP -11.4, two separated modes). New columns, raw left intact.
-    ff["RelSide_arm"] = ff["RelSide"] * (1 - 2 * ff["is_lhp"])
-    ff["HorzBreak_arm"] = ff["HorzBreak"] * (1 - 2 * ff["is_lhp"])
-    # The coach's deviation-from-typical release terms (see FEATS note). Must come AFTER
-    # RelSide_arm exists, since dev_relside is centred in the arm-side frame, and BEFORE the
-    # dropna so rows missing a source column are cut once on the final feature list.
-    for out, src in DEV_SRC.items():
-        ff[out] = (ff[src] - ff["is_lhp"].map(DEV_CENTRES[out])).abs()
+    ff = add_derived_feats(df[mask].copy())
     ff = ff.dropna(subset=feats + ["Target"])
     train = ff[ff["year"] == 2024]
     model = make_pipeline(StandardScaler(), Ridge(alpha=RIDGE_ALPHA))
     model.fit(train[feats].values, train["Target"].values)
     ff["ridge_pred"] = model.predict(ff[feats].values)
     return (ff, model) if return_model else ff
+
+
+def add_derived_feats(ff):
+    """Every model feature computed from source columns, added to any rows in place.
+
+    Arm-side frame for the two handedness-mirrored geometry features (see FEATS note):
+    one estimable slope per feature instead of a pooled average over two opposite
+    relationships (RelSide: RHP -0.0019 vs LHP +0.0034, P=1.000 they differ; HorzBreak:
+    RHP mean +10.6 vs LHP -11.4, two separated modes). New columns, raw left intact.
+
+    The coach's deviation-from-typical release terms (see FEATS note) come AFTER
+    RelSide_arm exists, since dev_relside is centred in the arm-side frame, and BEFORE any
+    dropna so rows missing a source column are cut once on the final feature list.
+
+    Movement geometry and the pooled-sinker columns are added on EVERY type so each graded
+    frame carries all of UNION_FEATS and the pitcher pages can lay one per-pitch vector on
+    one order. On a row that is not a sinker they are physics (mov_*) or exactly zero
+    (is_si, si_x_*, sec); no model but the sinker's reads them.
+    """
+    ff["RelSide_arm"] = ff["RelSide"] * (1 - 2 * ff["is_lhp"])
+    ff["HorzBreak_arm"] = ff["HorzBreak"] * (1 - 2 * ff["is_lhp"])
+    for out, src in DEV_SRC.items():
+        ff[out] = (ff[src] - ff["is_lhp"].map(DEV_CENTRES[out])).abs()
+    ff["mov_angle"] = np.degrees(np.arctan2(ff["HorzBreak_arm"], ff["InducedVertBreak"]))
+    ff["mov_mag"] = np.hypot(ff["HorzBreak_arm"], ff["InducedVertBreak"])
+    ff["mov_angle_sq"] = ff["mov_angle"] ** 2
+    ff["is_si"] = pitch_mask(ff, "SI").astype(float)
+    for f in SI_INTERACT:
+        ff[f"si_x_{f}"] = ff["is_si"] * ff[f]
+    # A sinker whose pitcher also throws a four-seam: add_fastball_diffs anchored it on the
+    # pooled four-seam group. A frame without anchor_type (an old fixture) has no secondary
+    # sinkers, the conservative reading, rather than an error.
+    if "anchor_type" in ff.columns:
+        sec = (ff["is_si"] == 1) & (ff["anchor_type"] == "_FF")
+    else:
+        sec = pd.Series(False, index=ff.index)
+    ff["is_secondary_si"] = sec.astype(float)
+    for c in DIFF_FEATS:
+        ff[f"{c}_sec"] = np.where(sec, ff[c], 0.0)
+    return ff
+
+
+def pooled_si_ridge(df, return_model=False):
+    """Sinker rows graded by the pooled four-seam+sinker ridge (see the POOLED_GROUPS note).
+
+    Trained exactly as coach_si_pooled_gate.py's "pooled_all": one StandardScaler+Ridge
+    (alpha RIDGE_ALPHA) on every 2024 four-seam and sinker row with complete
+    SI_POOLED_TRAIN_FEATS. The returned model is that ridge COLLAPSED onto SI_FEATS, the
+    interaction terms folded into their base slopes with is_si = 1 substituted, so it has
+    the same shape as every other type's model (scaler + ridge over the type's own feature
+    list) and the pitcher pages, the contract and the browser need no special case. The
+    collapse is exact and is asserted against the pooled prediction on every sinker row.
+    """
+    ff = add_derived_feats(df[df["is_ff"] | pitch_mask(df, "SI")].copy())
+    ff = ff.dropna(subset=SI_POOLED_TRAIN_FEATS + ["Target"])
+    train = ff[ff["year"] == 2024]
+    pooled = make_pipeline(StandardScaler(), Ridge(alpha=RIDGE_ALPHA))
+    pooled.fit(train[SI_POOLED_TRAIN_FEATS].values, train["Target"].values)
+    ff["ridge_pred"] = pooled.predict(ff[SI_POOLED_TRAIN_FEATS].values)
+    si = ff[ff["is_si"] == 1].copy()
+    if not return_model:
+        return si
+    # Raw-unit slopes of the pooled ridge, then the sinker's collapsed linear form.
+    sc, rg = pooled.named_steps["standardscaler"], pooled.named_steps["ridge"]
+    w = dict(zip(SI_POOLED_TRAIN_FEATS, rg.coef_ / sc.scale_))
+    a = float(rg.intercept_ - np.sum(rg.coef_ * sc.mean_ / sc.scale_)) + w["is_si"]
+    b = np.array([w[f] + (w[f"si_x_{f}"] if f in SI_INTERACT else 0.0) for f in SI_FEATS])
+    # Re-expressed on a scaler fitted to the sinker's own training rows, so scalerMean /
+    # scalerScale describe sinkers (the browser standardises a sinker against them).
+    scaler = StandardScaler().fit(si[si["year"] == 2024][SI_FEATS].values)
+    ridge = Ridge(alpha=RIDGE_ALPHA)
+    ridge.coef_ = b * scaler.scale_
+    ridge.intercept_ = a + float(np.dot(b, scaler.mean_))
+    ridge.n_features_in_ = len(SI_FEATS)
+    model = make_pipeline(scaler, ridge)
+    gap = float(np.max(np.abs(model.predict(si[SI_FEATS].values) - si["ridge_pred"].values)))
+    if gap > 1e-8:
+        raise AssertionError(f"collapsed sinker model departs from the pooled ridge by {gap:.3g}")
+    return si, model
+
+
+def ridge_for_group(df, group):
+    """The model that SHIPS for a PITCH_GROUPS key: (graded rows, fitted model, feature list).
+
+    Every coach-facing path (arsenal.fit_type, the Pitching+ weights contract, the season
+    floor, the official gate row) grades through here, so a group whose shipped model is not
+    its own FEATS_BY_PITCH ridge (POOLED_GROUPS) is decided in one place. Analysis scripts
+    that deliberately study a group's own model keep calling stuff_ridge directly.
+    """
+    if group in POOLED_GROUPS:
+        if group != "SI":
+            raise KeyError(f"no pooled model defined for {group!r}")
+        ff, model = pooled_si_ridge(df, return_model=True)
+        return ff, model, list(SI_FEATS)
+    mask = df["is_ff"] if group == "FF" else pitch_mask(df, group)
+    feats = feats_for(group)
+    ff, model = stuff_ridge(df, pitch_mask=mask, feats=feats, return_model=True)
+    return ff, model, feats
 
 
 def panel_ids(ff, min_n=PANEL_MIN_FF):

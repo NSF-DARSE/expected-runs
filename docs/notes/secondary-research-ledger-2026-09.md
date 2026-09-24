@@ -173,3 +173,53 @@ read on C.
   changeup to an opposite-side batter, away edge +1.9 vs inside edge +7.7. The heart is the
   cheapest region for every type because the xT surface charges balls; that is the shipped
   four-seam map's behaviour too.
+
+## Results: discovery pair D (2024 -> 2025), reads 1-4
+
+Appended after the reads; the pre-registration above is unchanged. Read count so far: 4.
+
+| read | type | n | location r | prior r | semipartial | gain mean | 95% CI | P(gain>0) | refits used |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 CONTROL | FF | 1839 | +0.218 | +0.164 | +0.164 | +0.062 | [+0.039, +0.082] | 1.000 | 200 |
+| 2 H1 | SI | 160 | -0.050 | +0.037 | -0.065 | -0.047 | [-0.128, +0.044] | 0.110 | 200 |
+| 2 H1 | FC | 79 | +0.061 | +0.031 | +0.054 | +0.002 | n/a | (0.500) | 2 |
+| 2 H1 | SL | 1145 | +0.124 | +0.143 | +0.081 | +0.019 | [-0.007, +0.048] | 0.890 | 200 |
+| 2 H1 | CB | 175 | +0.044 | +0.177 | -0.009 | -0.036 | [-0.105, +0.026] | 0.155 | 200 |
+| 2 H1 | CH | 493 | +0.088 | +0.174 | +0.045 | -0.008 | [-0.050, +0.032] | 0.350 | 200 |
+| 3 H2 | SI | 160 | +0.023 | +0.037 | +0.013 | -0.004 | [-0.073, +0.067] | 0.460 | 200 |
+| 3 H2 | FC | 79 | +0.038 | +0.031 | +0.030 | +0.009 | n/a | (1.000) | 2 |
+| 3 H2 | SL | 1145 | +0.113 | +0.143 | +0.073 | +0.014 | [-0.012, +0.042] | 0.825 | 200 |
+| 3 H2 | CB | 175 | +0.024 | +0.177 | -0.027 | -0.047 | [-0.113, +0.016] | 0.070 | 200 |
+| 3 H2 | CH | 493 | +0.068 | +0.174 | +0.024 | -0.021 | [-0.058, +0.017] | 0.140 | 200 |
+| 4 H3 | SI | 160 | +0.053 | +0.037 | +0.043 | +0.019 | [-0.043, +0.087] | 0.710 | 200 |
+| 4 H3 | FC | 79 | +0.099 | +0.031 | +0.094 | +0.039 | n/a | (1.000) | 5 |
+| 4 H3 | SL | 1145 | +0.133 | +0.143 | +0.094 | +0.026 | [-0.003, +0.053] | 0.960 | 200 |
+| 4 H3 | CB | 175 | +0.062 | +0.177 | +0.014 | -0.023 | [-0.088, +0.048] | 0.275 | 200 |
+| 4 H3 | CH | 493 | +0.098 | +0.174 | +0.053 | -0.004 | [-0.045, +0.044] | 0.390 | 200 |
+
+**The control passes** (P=1.000), so the cross-fitted D harness is sound.
+
+**The cutter is unreadable on D, and I did not anticipate it.** Its D pool is 79 pitchers. The
+gate's criterion-side resample keeps the unique pitchers drawn (about 63%, ~50), which is
+below MIN_PITCHERS 60, so all but 2-5 of the 200 refits are discarded. The frozen gate has the
+same property; it never bit before because every earlier read was on C (FC n=190). The FC rows
+on D above are point estimates plus a handful of refits, and the parenthesised P values mean
+nothing. Consequence under the pre-registered decision rule: the FC "gain_mean > 0 on D"
+condition is mechanically met for all three candidates but carries no information, so I will
+treat any FC pass on C as NOT replicated on D. That is the conservative reading and is decided
+here, before the C reads.
+
+**Shrinkage diagnostics on D.** H2 k (pitches for half weight on the pitcher's own mean): SI
+107, FC 113, SL 47, CB 62, CH 49. H3 cross-pitch slope b is positive for every type (+0.014 to
++0.026 run value per SD of other-pitch location score): pitchers who locate their other pitches
+well locate this one well too, in the correct direction.
+
+**Selection for read 7 (pre-registered rule: higher median D gain_mean across the five types).**
+H2 median -0.004, H3 median +0.019. **H3 goes to C; H2 is never read on C.** The choice does not
+depend on the unreadable FC rows: on SI, SL, CB, CH alone the medians are H2 -0.013, H3 +0.007.
+
+Discovery picture before confirmation: the only type with a positive, near-bar D signal is the
+slider (H1 0.890, H3 0.960). Changeup and curveball are negative on D for every candidate even
+though their location r is positive: their prior results are the stronger predictor on this
+pair (+0.17 to +0.18) and the grade adds little beyond them. The sinker's own-pitch map is
+wrongly oriented on D (H1 r -0.050) and only becomes positive when shrunk.

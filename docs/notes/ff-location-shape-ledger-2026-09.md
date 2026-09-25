@@ -158,3 +158,33 @@ and it is stable (reliability drops with it), but it is signal Stuff+ already ca
 three-way blend SHAPE_V ties CONTROL (+0.0004, SE 0.0023). So the shipped Location+ leans a
 little on stuff, and inside Pitching+ that costs nothing. SHAPE_VH loses on every count; its 18
 surfaces thin the cells enough that map noise shows up as lost reliability.
+
+## Results: confirmation pair C (2025 -> 2026), read 2
+
+Run once, as registered. Read count: 2 of 2 (cap 4). The shape line is closed.
+
+| candidate | n | location r | semipartial | r(grade, Stuff+) | gain mean | 95% CI | P(gain>0) | Delta vs CONTROL (SE) | P(Delta>0) | 3-way Delta (SE) | P(3-way Delta>0) |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| CONTROL | 2007 | +0.175 | +0.122 | +0.105 | +0.042 | [+0.023, +0.063] | 1.000 | | | | |
+| SHAPE_V | 2007 | +0.157 | +0.104 | +0.025 | +0.032 | [+0.014, +0.052] | 1.000 | -0.010 (0.003) | 0.000 | -0.004 (0.003) | 0.085 |
+| SHAPE_VH | 2007 | +0.144 | +0.093 | +0.009 | +0.024 | [+0.004, +0.044] | 0.990 | -0.018 (0.007) | 0.005 | -0.009 (0.005) | 0.030 |
+
+Two-way blend (results + Stuff+) on this pool: r +0.218; with CONTROL +0.242.
+
+**Harness check passes.** CONTROL reproduces the secondary pass's read 5 exactly (n 2007, gain
++0.0417, CI [+0.0225, +0.0631], P 1.000).
+
+**Verdict: the shipped four-seam Location+ stays.** Both shape candidates are worse than it on
+both pairs, by 2-3 SE on the blend gain, and neither is "improves" under any reading of the
+rules. Conditioning a four-seam's location value on its shape removes most of the grade's
+overlap with Stuff+ (0.105 to 0.025 on C, 0.19 to 0.11 on D), and what it removes is useful:
+on C it costs a little even inside the three-way blend (-0.004, about 1.4 SE), so part of what
+the shipped map credits is not fully carried by the four-seam Stuff+ ridge either. The
+interaction the criterion-free table showed (flat fastballs gain the most just above the zone)
+is real in xT, but grading pitchers on it measures less of what predicts next season than
+grading them on the average fastball's map does.
+
+What this closes, with the earlier reads: for the four-seam, count (script 04), batter frame
+(script 09) and pitch shape (here) have all been tried against the pooled catcher-frame map
+and none beats it. Remaining headroom for four-seam Location+ is precision (sample size), not
+the map's conditioning.

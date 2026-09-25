@@ -22,7 +22,7 @@ perspective, LOWER = BETTER:
            pitches never value their own 2024 locations.
 Pool and criterion are the frozen gate's pair C exactly: 15+ pitches and 10%+ share in 2025
 (score build) and in 2026 (criterion build), criterion = 2026 mean adjT on the type. A pitcher
-is RETURNING if he has 15+ graded pitches of the type in 2024.
+is RETURNING with 15+ graded pitches of the type in 2024.
 
 A TWO-SEASON component is the pitch-weighted mean of 2025 and 2024 with the older season
 discounted by lambda: (n25 x25 + lambda n24 x24) / (n25 + lambda n24); a non-returning pitcher
@@ -37,7 +37,7 @@ full pool is reported beside it. A scope with fewer than MIN_READ pitchers is no
 THE TEST is one cross-fitted read per scope. Pitchers are split into two fixed halves (seed 20260925,
 blind to outcomes). The candidate with the higher forecast r on one half is applied to the
 other, so every pitcher's two-season forecast was chosen without their own criterion.
-Delta = r(cross-fitted forecast, criterion) - r(ONE, criterion) over the full pool. 2000
+Delta = r(cross-fitted forecast, criterion) - r(ONE, criterion) over the scope. 2000
 bootstrap resamples of pitchers within each half repeat the choice and the scoring, so the
 selection is inside the uncertainty. "Improves" iff P(Delta > 0) >= 0.95.
 

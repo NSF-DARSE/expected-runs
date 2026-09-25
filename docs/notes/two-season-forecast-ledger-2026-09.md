@@ -113,3 +113,76 @@ re-derived on pooled pitch counts.
   round numbers fixed here, not tuned.
 - Before registering, the harness ran with `--dry` only: pool sizes, returning shares, and
   median pitch counts. No correlation with any outcome was computed.
+
+## Results, read 1 (2026-09-25)
+
+One invocation, 55 s, `coach_two_season_forecast.json` in the score workdir. No bug found, no
+second read.
+
+### Verdict: no type and no scope improves. The one-season forecast stands.
+
+Returning pitchers (the confirmatory scopes):
+
+| type | n | one-season r | two-season r (picks) | Delta | SE | P(Delta>0) |
+|---|---|---|---|---|---|---|
+| FF | 646 | +0.278 | +0.285 (R1 / RH) | +0.007 | 0.023 | 0.549 |
+| SL | 362 | +0.279 | +0.300 (RH / R1) | +0.021 | 0.024 | 0.819 |
+| CH | 161 | +0.266 | +0.298 (RH / R1) | +0.032 | 0.040 | 0.810 |
+
+Full pool (secondary): FF +0.000 (SE 0.006, P 0.43), SL +0.003 (0.005, P 0.67), CB +0.003
+(0.006, P 0.61), CH +0.005 (0.010, P 0.71), SI -0.003 (0.011, P 0.46). CB and SI returning
+scopes (60 and 49) were not read, as registered.
+
+All three returning point estimates are positive and all three are under 1 SE, so each is a
+tie by the registered rule. Nothing ships and no recommendation to change the publisher
+follows.
+
+### What the read shows beyond the verdict
+
+**The results component gains, the forecast mostly does not.** On returning pitchers, two
+seasons of results predict the criterion much better than one: FF 0.172 -> 0.197, SL 0.215 ->
+0.268, CH 0.153 -> 0.227. The blend keeps about 40 to 55% of that gain (best candidate R1 vs ONE: FF +0.010, SL +0.026, CH +0.041). The physical
+grades already carry most of the stable skill that a second season of results recovers, so
+adding it back through results is largely redundant. This is the expectation written above
+("the gain should come almost entirely from pooling results") being right about where the
+signal is and wrong about how much of it survives the blend.
+
+**Pooling Stuff+ costs, as expected.** On every returning scope the results-only candidates
+(R1, RH) scored above the all-component ones (P1, PH), descriptively: FF 0.288 vs 0.266 for P1,
+SL 0.305 vs 0.285, CH 0.307 vs 0.283. Last season's Stuff+ is staler than it is noisy.
+
+**Audit: the physical grades still add over two seasons of results.** Physics added on top of
+results, one-season vs two-season results, returning pitchers:
+
+| type | over one season | over two seasons | P(> 0), two seasons |
+|---|---|---|---|
+| FF (Stuff+ and Location+) | +0.106 | +0.091 | 0.998 |
+| CH (Stuff+) | +0.112 | +0.080 | 0.962 |
+| SL (Stuff+) | +0.064 | +0.037 | 0.854 |
+
+For a returning four-seam the physical grades lose about 15% of their increment when results
+double, and still add +0.09 in r. They are not only a small-sample substitute for results.
+That supports the page's design, which shows Stuff+ and Location+ for veterans as well as
+freshmen.
+
+### What I got wrong in the design: power
+
+The pre-registration expected a gain of +0.02 to +0.05 on returning four-seams, and did not
+check whether this pair could detect one. It could not. P(Delta > 0) >= 0.95 needs a mean
+Delta near 1.65 SE, which on these scopes is about +0.038 (FF), +0.039 (SL) and +0.065 (CH).
+The returning pools are a third of the full pool, and every returning pitcher's forecast
+changes, so the paired difference is noisy. The read was able to rule out a large gain
+(the FF 95% interval is -0.041 to +0.052) and was never able to confirm a modest one. Future
+registrations should state the minimum detectable Delta before the read.
+
+### Carried forward: one blind candidate for the 2027 read
+
+Locked now, before any 2027 data exists: **R1** (results pooled over the two prior seasons,
+lambda 1, Stuff+ and Location+ from the latest season only), on returning pitchers, FF, SL and
+CH, forecast from 2025 and 2026 grading the 2027 criterion. It was the best candidate
+descriptively on all three returning scopes here, which is why it is the one carried; the
+2027 read is its first unseen test. Decision rule as above. Also registered for that read: the
+same Delta pooled across the three types with inverse-variance weights, reported with its own
+P, because per-type pools this size cannot resolve the effect this read suggests. Nothing
+else is carried; the GLS contract evaluated at pooled pitch counts is a separate idea and is
+not registered.

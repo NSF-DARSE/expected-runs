@@ -261,3 +261,88 @@ does not rescue it. Physics repeats, location does not predict, results barely r
 sample there is no cutter grade of either kind to validate.
 
 These two discoveries trigger the pre-registered audits (reads 8 and 9).
+
+## Results: decomposition audits, reads 8-9 (pair C, no bar)
+
+Both triggered by the H3 discoveries, as pre-registered. Final read count: **9 of the 9
+allowed** (4 on D, 5 on C; 2 of the 9 are harness controls). Nothing was re-run.
+
+**Read 8, other-pitch command alone as the grade** (`AUDIT_O`: the pitcher's standardised
+location on his OTHER pitch types, no own-pitch information). The pool drops pitchers without 15
+other pitches, which removes at most 4.
+
+| type | n | r | semipartial | gain mean | P(gain>0) | compare H1 (own only) / H3 (both) |
+|---|---|---|---|---|---|---|
+| SI | 270 | +0.112 | +0.078 | -0.006 | 0.445 | 0.965 / 0.985 |
+| FC | 190 | +0.170 | +0.150 | +0.068 | 0.945 | 0.045 / 0.270 |
+| SL | 1259 | +0.092 | +0.071 | -0.001 | 0.485 | 0.700 / 0.980 |
+| CB | 301 | -0.016 | -0.037 | -0.053 | 0.030 | 0.570 / 0.485 |
+| CH | 620 | +0.116 | +0.103 | +0.025 | 0.850 | 0.465 / 0.880 |
+
+For both discovered types the borrowed information does not carry the gain: other-pitch command
+alone adds nothing to the sinker (0.445) or the slider (0.485). The gain lives in the pitch's
+OWN location, and the other-pitch prior works as a precision device. It decides how far to
+shrink a thin sample, and toward what. That is clearest on the slider, where the own-pitch grade
+alone reads 0.700, the borrowed score alone 0.485, and the shrunk combination 0.980. On the
+construct question registered before the reads, H3 is a per-pitch Location+ with a better
+estimator, not a pitcher-level command score in disguise.
+
+One number here is not a finding: the cutter's other-pitch score reads 0.945, just under the
+bar, while both cutter Location+ candidates fail. This is an audit row, it was not registered
+as a candidate, and it is the sort of near-miss that invites a follow-up read on the same pair.
+It is recorded, not pursued. If anyone wants "a cutter is thrown well by pitchers who locate
+everything else well" tested, it goes to the 2026->2027 pair, pre-registered.
+
+**Read 9, does Location+ still add next to the shipped Stuff+?** Equal-z three-way blend
+(results + Stuff+ + Location+) against two-way (results + Stuff+), same bootstrap structure. The
+Stuff+ component reproduces the gate exactly on these pools (SI r +0.1892 with the shipped
+pooled model, SL +0.1815).
+
+| type | n | r(loc, stuff) | r(loc, prior) | results+stuff | +loc | gain | 95% CI | P(gain>0) |
+|---|---|---|---|---|---|---|---|---|
+| SI | 272 | -0.060 | +0.315 | +0.295 | +0.353 | +0.058 | [+0.007, +0.113] | 0.985 |
+| SL | 1263 | +0.075 | +0.383 | +0.241 | +0.259 | +0.018 | [-0.005, +0.039] | 0.945 |
+
+Location+ is close to orthogonal to Stuff+ on both types, and it survives in the combined
+score: clearly for the sinker, at the edge for the slider. Its overlap is with prior results
+(r +0.32 / +0.38), which is expected, since both include what happened on balls and strikes,
+and the gate already prices that overlap in.
+
+## Verdict
+
+- **Discovered, not confirmed:** a per-type Location+ for the **sinker** (gate P=0.985, n=272)
+  and the **slider** (P=0.980, n=1263), under H3: batter-relative platoon-split map,
+  count-relative, shrunk by empirical Bayes toward the pitcher's location on his other pitches.
+  Both replicate in direction on 2024->2025 (D gain +0.019 / +0.026). Both audits point the
+  right way: own-pitch location carries the gain, and it holds next to Stuff+ (0.985 / 0.945).
+- **Cautions that keep this at "discovered":** 3 of 10 confirmatory tests cleared the bar
+  against ~0.5 expected by chance; both discovered CIs have lower ends at +0.002; the D pair's
+  support is directional only (SL D P=0.960, SI D P=0.710); the maps are fit on xT and the
+  criterion is built from xT, the shared-map concern `coach_loc_ceiling_criterion.py` examined
+  for four-seams but that was not re-run for these types.
+- **Clean negatives:** cutter Location+ (both candidates, P 0.045 / 0.270), curveball (0.570 /
+  0.485), changeup (0.465 / 0.880). Population shrinkage (H2) lost the discovery selection and
+  was never read on C.
+- **The cutter conclusion changes.** The previous pass parked the cutter as "a Location+
+  question". Measured, cutter location has no validity at n=190 either. Physics repeats; neither
+  where it is thrown nor what it does repeats. The cutter has no validatable grade of either kind
+  on this data.
+- **Sinker note.** A Location+ for the sinker is a different construct from the locked sinker
+  Stuff+. This result does not touch the 2026->2027 blind Stuff+ read or the provisional ruling.
+  It does suggest the sinker's repeatable skill sits partly in location. That fits the August
+  loop's finding that sinker results repeat at r=0.24 while physics tops out at 0.19.
+
+## Recommendations for Jack (nothing adopted, nothing shipped)
+
+1. **Decide whether H3 sinker and slider Location+ go into the 2026->2027 blind read as locked
+   candidates.** That is the confirmation this cannot provide. My recommendation is yes, with
+   the exact construction frozen as in `coach_location_gate.py` (m values, frame, shrinkage),
+   and the curveball and changeup read alongside them so a pass is judged on the family.
+2. **Decide whether a "drafted" Location+ for SI/SL is wanted on the coach page before 2027**,
+   as was done for the sinker Stuff+. My recommendation is no. P values at the bar with CIs
+   touching zero are weaker evidence than the sinker Stuff+ ruling had, and a fastball-only
+   Location+ is the stated product rule. The overturning evidence should be the 2027 read, not
+   this one.
+3. **If Location+ is ever extended to secondaries,** the display needs a shrinkage-aware sample
+   flag: the half-weight point is ~45-140 pitches by type, so a 30-pitch slider Location+ is
+   mostly the prior.

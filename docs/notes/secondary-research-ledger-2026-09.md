@@ -223,3 +223,41 @@ slider (H1 0.890, H3 0.960). Changeup and curveball are negative on D for every 
 though their location r is positive: their prior results are the stronger predictor on this
 pair (+0.17 to +0.18) and the grade adds little beyond them. The sinker's own-pitch map is
 wrongly oriented on D (H1 r -0.050) and only becomes positive when shrunk.
+
+## Results: confirmation pair C (2025 -> 2026), reads 5-7
+
+Run once each, in the registered order, after the D results and the H2-vs-H3 selection were
+committed. Read count so far: 7 (all fixed reads done). Pools match the frozen Stuff+ gate's n
+for every type.
+
+| read | type | n | location r | prior r | semipartial | r(grade, prior) | gain mean | 95% CI | P(gain>0) | D gain mean | status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 5 CONTROL | FF | 2007 | +0.175 | +0.150 | +0.122 | +0.428 | +0.042 | [+0.023, +0.063] | 1.000 | +0.062 | harness check passes |
+| 6 H1 | SI | 272 | +0.244 | +0.243 | +0.167 | +0.365 | +0.048 | [-0.003, +0.107] | **0.965** | -0.047 | C pass, NOT replicated on D |
+| 6 H1 | FC | 190 | -0.046 | +0.121 | -0.082 | +0.270 | -0.074 | [-0.143, +0.009] | 0.045 | (unreadable) | no |
+| 6 H1 | SL | 1263 | +0.136 | +0.181 | +0.067 | +0.416 | +0.006 | [-0.023, +0.034] | 0.700 | +0.019 | no |
+| 6 H1 | CB | 301 | +0.086 | +0.108 | +0.050 | +0.367 | +0.007 | [-0.052, +0.069] | 0.570 | -0.036 | no |
+| 6 H1 | CH | 622 | +0.113 | +0.173 | +0.054 | +0.361 | -0.003 | [-0.043, +0.036] | 0.465 | -0.008 | no |
+| 7 H3 | SI | 272 | +0.243 | +0.243 | +0.175 | +0.315 | +0.053 | [+0.002, +0.109] | **0.985** | +0.019 | **discovered** |
+| 7 H3 | FC | 190 | +0.035 | +0.121 | +0.003 | +0.260 | -0.023 | [-0.093, +0.056] | 0.270 | (unreadable) | no |
+| 7 H3 | SL | 1263 | +0.167 | +0.181 | +0.106 | +0.383 | +0.028 | [+0.002, +0.056] | **0.980** | +0.026 | **discovered** |
+| 7 H3 | CB | 301 | +0.074 | +0.108 | +0.037 | +0.368 | -0.002 | [-0.055, +0.061] | 0.485 | -0.023 | no |
+| 7 H3 | CH | 622 | +0.147 | +0.173 | +0.097 | +0.321 | +0.023 | [-0.018, +0.059] | 0.880 | -0.004 | no |
+
+Every "location r" is positive except H1 FC, so orientation is correct wherever it matters: a
+LOWER (better) location value goes with a LOWER (better) next-season run value.
+
+**Verdicts under the pre-registered rule.** H3 (per-type Location+ shrunk toward the pitcher's
+location on his other pitches) is DISCOVERED for the sinker (P=0.985) and the slider (P=0.980).
+H1 passes the bar for the sinker on C (0.965) but its D gain is negative, so it is "C pass, not
+replicated on D", not discovered. Nothing passes for the cutter, curveball or changeup. Of the
+10 confirmatory per-type tests, 3 cleared 0.95 against about 0.5 expected by chance under a
+global null; two of them are the same type (SI) under nested candidates. Both discovered rows
+sit near the bar with CIs whose lower ends touch zero (+0.002). Discovered, not confirmed.
+
+**The cutter.** The hypothesis that motivated this pass fails cleanly: cutter Location+ has no
+validity on C (H1 r -0.046, H3 +0.035, n=190) and borrowing the pitcher's other-pitch command
+does not rescue it. Physics repeats, location does not predict, results barely repeat. At this
+sample there is no cutter grade of either kind to validate.
+
+These two discoveries trigger the pre-registered audits (reads 8 and 9).

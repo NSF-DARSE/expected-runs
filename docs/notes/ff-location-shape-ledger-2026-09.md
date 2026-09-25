@@ -128,3 +128,33 @@ least one clears 0.95 by luck.
   correlations between candidates, top-vs-bottom-of-zone values; no prior, no criterion) and the
   scratch xT table above (2024 train rows' own xT only). Those fixed the cut points and the
   expectation of a small effect. Nothing else was looked at.
+
+## Results: discovery pair D (2024 -> 2025), read 1
+
+Appended after the read; the pre-registration above is unchanged. Read count: 1 of 2 (cap 4).
+Read 2 (pair C) was started before these results were seen and is not yet looked at.
+
+| candidate | n | location r | semipartial | r(grade, Stuff+) | gain mean | 95% CI | P(gain>0) | Delta vs CONTROL (SE) | P(Delta>0) | 3-way Delta (SE) | reliability r |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| CONTROL | 1839 | +0.218 | +0.164 | +0.193 | +0.062 | [+0.039, +0.082] | 1.000 | | | | 0.352 |
+| SHAPE_V | 1839 | +0.208 | +0.153 | +0.110 | +0.056 | [+0.033, +0.077] | 1.000 | -0.006 (0.003) | 0.030 | +0.000 (0.002) | 0.332 (-0.020, SE 0.008) |
+| SHAPE_VH | 1839 | +0.186 | +0.131 | +0.099 | +0.044 | [+0.023, +0.066] | 1.000 | -0.018 (0.006) | 0.000 | -0.009 (0.005) | 0.262 (-0.092, SE 0.014) |
+
+Two-way blend (results + Stuff+, no Location+) on this pool: r +0.234. Reliability is the
+2024-to-2025 grade on 1850 pitchers with 15+ four-seams in both seasons.
+
+**Harness check passes.** CONTROL reproduces the secondary pass's read 1 exactly (n 1839, gain
++0.0615, CI [+0.0393, +0.0821], P 1.000).
+
+**Neither candidate can improve on D.** Both are below the shipped map on the blend gain
+(SHAPE_V by about 1.9 SE, SHAPE_VH by about 2.8 SE) and on reliability. Under the registered
+rule the D direction fails for both, so neither can be "improves" whatever C shows.
+
+**What the decomposition says.** Valuing each location for the pitch's own shape cuts the
+grade's correlation with Stuff+ from 0.19 to 0.11: about 40% of the shipped Location+'s overlap
+with Stuff+ comes from the map crediting pitchers whose fastballs are shaped to play where
+fastballs play well. That overlap is real predictive signal (standalone validity drops with it)
+and it is stable (reliability drops with it), but it is signal Stuff+ already carries. In the
+three-way blend SHAPE_V ties CONTROL (+0.0004, SE 0.0023). So the shipped Location+ leans a
+little on stuff, and inside Pitching+ that costs nothing. SHAPE_VH loses on every count; its 18
+surfaces thin the cells enough that map noise shows up as lost reliability.

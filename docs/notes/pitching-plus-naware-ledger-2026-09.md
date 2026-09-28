@@ -103,3 +103,61 @@ not make.
   alone, and N_REF is the app floor.
 - The dry run above computed within-2025 reliability and predictor-only correlations before
   this registration. It did not compute any correlation with the criterion.
+
+## Results, read 1 (2026-09-28)
+
+One invocation, 147 s, `coach_pitching_plus_naware.json` in the score workdir. No bug found, no
+second read.
+
+### Verdict: a tie. NAWARE does not clear the bar; script 08's Pitching+ stands.
+
+| stratum | n | SHIPPED r | NAWARE r | Delta | SE | P(Delta>0) |
+|---|---|---|---|---|---|---|
+| **under 200 (primary)** | 1,454 | +0.186 | +0.203 | **+0.016** | 0.016 | **0.851** |
+| full pool | 2,007 | +0.234 | +0.249 | +0.016 | 0.013 | 0.885 |
+| 15-49 | 404 | +0.122 | +0.134 | +0.013 | 0.031 | 0.664 |
+| 50-99 | 472 | +0.131 | +0.151 | +0.020 | 0.013 | 0.925 |
+| 100-199 | 578 | +0.280 | +0.282 | +0.002 | 0.005 | 0.681 |
+| 200+ | 553 | identical by construction | | | | |
+
+P = 0.851 is under 0.95 and Delta is 1.0 SE, so NAWARE does not improve by the registered rule.
+
+### What the read shows beyond the verdict
+
+**Direction is consistent, size is small.** The point estimate is positive in every bin and the
+95% interval on the primary stratum is -0.016 to +0.047, so NAWARE is unlikely to be a worse
+forecast than the number it would replace. The gain it does show is about the size of the
+minimum detectable effect, and the read could not separate it from zero.
+
+**Results carry it.** Down-weighting results alone reaches r 0.197 on the primary stratum,
+Location+ alone 0.190, both together 0.203. The one-third weight on results at small counts is
+where the current blend loses most.
+
+**The power estimate was optimistic.** The bootstrap SE on the primary stratum was 0.016, about
+30% above the Steiger approximation registered (0.0124), so the real minimum detectable Delta
+was about +0.027, not +0.021. The approximation assumed r = 0.24 on a stratum whose actual r is
+0.19 and ignores the heavy tails of run value. Future registrations should get power from a
+simulation on the dry-run predictors, or inflate the analytic SE by a third.
+
+**Not run: the discovery pair.** Reading pair D now and pooling it with this read would be
+optional stopping after a near-miss, so it is not done.
+
+### What this means for the page
+
+Nothing changes on its own. Two facts for Jack's product call, neither of them a pass:
+
+- On arms under 200 four-seams, NAWARE forecasts at least as well as script 08's blend (point
+  estimate higher in every bin, interval lower bound -0.016) and its split-half reliability is
+  far higher at small counts (0.58 vs 0.19 at 15 pitches, 0.62 vs 0.43 at 50).
+- The pre-registered floor rule kept the floor at 200; the reliability NAWARE reaches at 15
+  pitches already clears the standard the app applies to Stuff+, Location+ and adjusted results.
+
+If Jack wants a Pitching+ shown below 200, NAWARE is the version to show, labelled as leaning on
+the pitch's shape at small counts, which is what the mix card already says. That decision is
+his; this read did not earn it on its own.
+
+### Carried forward: blind 2027 read
+
+Locked now, before any 2027 data exists: NAWARE exactly as registered (n0 re-measured on the
+graded season alone, N_REF 200), primary stratum under 200 four-seams, same decision rule, on
+the 2026 -> 2027 pair. It has no parameter to tune, so the 2027 read is a clean test.

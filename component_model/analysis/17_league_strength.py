@@ -1,5 +1,11 @@
 """17: Can the fair criterion see conference strength? A joint global-mean adjustment.
 
+ADOPTED 2026-10-29. G below is now what fair_criterion.add_adjusted produces as adjT; both
+build it through league_strength.fit_season, so this script and every scorer share one
+code path. "C2" in this script's tables is the RETIRED within-league criterion
+(fair_criterion.add_adjusted_within_league), kept here as the comparison. The rest of this
+docstring is the pre-adoption framing, left as written.
+
 The problem. add_adjusted (fair_criterion.py) builds C2 = adjT by subtracting each game's
 League mean xT and a batter effect measured against the batter's OWN league mean. Inside
 a closed conference every run a pitcher allows is a run that conference's hitters score,
@@ -61,9 +67,8 @@ s12 = importlib.import_module("12_reliability_decomposition")
 SEASONS = [2024, 2025, 2026]
 PAIRS = [(2024, 2025), (2025, 2026)]
 TRAIN_YEAR = 2024
-CONF_LAM = 10.0     # near-free conference terms: identified by cross-league games
-HOME_LAM = 1.0
-CONTEXT = ["bconf", "batter", "park", "home"]   # what G subtracts; pitcher terms stay
+# The penalties and the subtracted context live in league_strength (CONF_LAM, HOME_LAM,
+# CONTEXT) because fair_criterion.add_adjusted uses them too.
 CRITS = ["xT", "C2", "C2p", "G"]
 
 
@@ -107,8 +112,7 @@ def build_frame(args):
         sys.exit(f"caches predate model features {missing}; rebuild them with the "
                  "current fair_criterion.load_pitches before running this script")
     fc.add_xt(df)                       # pooled over all seasons, as script 12
-    ls.add_home_away(df)
-    games = ls.game_table(df)
+    games, confs = ls.assign_conferences(df)   # the same assignment add_adjusted uses
 
     hr("WHAT THE League COLUMN HOLDS")
     per_game = df.groupby(["year", "GameID"])["League"].nunique()
@@ -128,12 +132,6 @@ def build_frame(args):
     print("     A team's conference is the modal League of its home games")
     print("     (league_strength.team_conferences documents the fallbacks).")
 
-    confs = ls.team_conferences(games)
-    cm = confs.set_index(["year", "team"])["conf"]
-    df["bat_conf"] = cm.reindex(pd.MultiIndex.from_arrays(
-        [df["year"], df["BatterTeam"]])).fillna(ls.UNKNOWN_CONF).values
-    df["pit_conf"] = cm.reindex(pd.MultiIndex.from_arrays(
-        [df["year"], df["PitcherTeam"]])).fillna(ls.UNKNOWN_CONF).values
     src = confs.set_index(["year", "team"])["source"]
     df["bat_src"] = src.reindex(pd.MultiIndex.from_arrays(
         [df["year"], df["BatterTeam"]])).fillna("unknown").values
@@ -157,13 +155,16 @@ def build_frame(args):
 # ---------------- criteria ----------------
 
 def add_c2(df):
-    """C2 per season (the leakage-safe version) and the pooled-frame C2p."""
+    """The retired within-league C2, per season (leakage-safe) and pooled-frame (C2p).
+
+    Calls add_adjusted_within_league by name: since the adoption, plain add_adjusted
+    returns G, and calling it here would compare G with itself."""
     df["C2"] = np.nan
     for yr in SEASONS:
         sub = df[df["year"] == yr].copy()
-        fc.add_adjusted(sub)
+        fc.add_adjusted_within_league(sub)
         df.loc[sub.index, "C2"] = sub["adjT"]
-    fc.add_adjusted(df)
+    fc.add_adjusted_within_league(df)
     df["C2p"] = df["adjT"]
 
     hr("THE PREMISE: what C2 subtracts between conferences")
@@ -174,16 +175,6 @@ def add_c2(df):
         print(f"  {yr}: sd across conferences of League mean xT = "
               f"{100 * lg.std():.2f} per 100 pitches (range {100 * lg.min():+.2f} to "
               f"{100 * lg.max():+.2f})")
-
-
-def season_blocks(sub, K):
-    bk = sub["Batter"].astype(str) + "|" + sub["BatterTeam"].astype(str)
-    return [ls.Block("pconf", ls.encode(sub["pit_conf"])[0], CONF_LAM),
-            ls.Block("bconf", ls.encode(sub["bat_conf"])[0], CONF_LAM),
-            ls.Block("pitcher", ls.encode(sub["PitcherId"])[0], K),
-            ls.Block("batter", ls.encode(bk)[0], K),
-            ls.Block("park", ls.encode(sub["home_team"])[0], K),
-            ls.Block("home", ls.encode(sub["bat_home"])[0], HOME_LAM)]
 
 
 def add_global(df, args):
@@ -197,11 +188,9 @@ def add_global(df, args):
     for yr in SEASONS:
         m = (df["year"] == yr) & df["xT"].notna()
         sub = df[m]
-        blocks = season_blocks(sub, args.K)
-        X = ls.design(blocks, len(sub))
-        fit = ls.fit_joint(sub["xT"].values, blocks, design_cache=X)
-        ctx = ls.context_effect(fit, blocks, CONTEXT)
-        df.loc[sub.index, "G"] = ls.global_criterion(sub["xT"].values, ctx)
+        # The adopted criterion's own code path (fair_criterion.add_adjusted calls this).
+        G, fit, blocks, X = ls.fit_season(sub, args.K)
+        df.loc[sub.index, "G"] = G
         bat = ls.context_effect(fit, blocks, ["bconf", "batter"])
         pit = ls.context_effect(fit, blocks, ["pconf", "pitcher"])
         S = ls.group_mean_centered(bat, sub["bat_conf"])

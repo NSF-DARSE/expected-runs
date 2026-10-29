@@ -3,7 +3,10 @@
 Everything numerically load-bearing is defined here exactly once:
   - data loading (dedup on PitchUID, keep first) with a local parquet cache
   - xT: luck/defense-stripped expected run value (EV/LA map for balls in play)
-  - adjT: opponent-adjusted xT (league means + batter effects shrunk toward league)
+  - adjT: opponent-adjusted xT. Since 2026-10-29 a per-season joint fit of batter,
+    conference, park and home effects against one global mean, so conference strength
+    is removed too (add_adjusted; the old within-league version is kept as
+    add_adjusted_within_league)
   - the fixed Stuff+ reference (Ridge alpha=10 on the FEATS physical features,
     trained 2024; the count is deliberately not restated here, since it has
     changed twice and the stale number outlived the truth both times)
@@ -49,8 +52,8 @@ session, each caught in review):
     for it and for nothing else.
   - The three differ only in how much is replaced by expectation: Target = the
     realized event valued by the RE table (luck included); xT = batted balls
-    replaced by the EV/LA-map value; adjT = xT with league mean and a shrunk
-    batter effect also removed. Distinguish Target as "unadjusted", not "actual".
+    replaced by the EV/LA-map value; adjT = xT with the fitted batter, batter-
+    conference, park and home effects also removed. Distinguish Target as "unadjusted", not "actual".
   - Prefer "run value" in any user-facing text: accurate, standard, and it does
     not imply runs crossed the plate.
 """
@@ -287,6 +290,10 @@ RIDGE_ALPHA = 10
 
 # Shrinkage weight for the batter effect in add_adjusted: a batter with K pitches
 # is credited with half his own measured effect and half his league's average.
+# Since 2026-10-29 the same K is the ridge penalty on individual pitcher, batter and
+# park effects in the adopted global fit (league_strength.season_blocks), so a batter
+# is shrunk toward his CONFERENCE effect rather than his league mean. The sweep below
+# was run on the within-league version and was not repeated on the global one.
 #
 # Was 200, chosen by convention rather than tuned. Swept 2026-08-14 over
 # K = 0, 25, 50, 100, 200, 400, 800, 1600, 3200 and infinity, on both available
@@ -603,9 +610,59 @@ def add_xt(df):
     return df
 
 
-def add_adjusted(df, K=BATTER_K):
-    """Adds adjT in place: xT minus league mean and shrunk batter effect,
-    recentered on the grand mean. Leagues under 5000 rows fall back to grand mean."""
+# ---- which opponent adjustment builds adjT (C2) ----
+# "global" (ADOPTED 2026-10-29, script 17): a joint ridge fit per season of pitcher,
+#   pitcher-conference, batter, batter-conference, park and batting-at-home effects against
+#   ONE global mean, with conferences linked through non-conference games
+#   (league_strength.add_global_criterion). adjT is xT minus the batter, batter-conference,
+#   park and home terms. It sees conference STRENGTH, which the within-league version
+#   cannot: on the 2024->2025 and 2025->2026 D1 four-seam panels it raised criterion
+#   reliability by +0.034 (SE 0.006) and Stuff+ validity by +0.037 (SE 0.005). The
+#   conference-mover test (n=242) was underpowered and did not confirm it; Jack ruled that
+#   too small to block adoption. RESULTS.md has both the case and the caveat.
+# "within_league" (the C2 used through 2026-10-28): xT minus the game's League mean and a
+#   batter effect measured against the batter's own league, shrunk with BATTER_K, batter
+#   effects pooled across every season in the frame. Kept for comparison and reruns of
+#   older results; it is NOT the criterion any more.
+# STUFFPLUS_ADJ_METHOD overrides the default for a whole run (e.g. a before/after diff of
+# a scorer's output) without editing any script; a non-default value prints a banner.
+ADJ_METHODS = ("global", "within_league")
+ADJ_METHOD_DEFAULT = "global"
+
+
+def resolve_adj_method():
+    """The adjustment method this run uses: STUFFPLUS_ADJ_METHOD if set, else the default."""
+    return os.environ.get("STUFFPLUS_ADJ_METHOD") or ADJ_METHOD_DEFAULT
+
+
+def add_adjusted(df, K=BATTER_K, method=None):
+    """Adds adjT (C2, the fair criterion) in place. The canonical entry point.
+
+    method: "global" (default, adopted 2026-10-29) or "within_league" (the previous C2).
+    None means STUFFPLUS_ADJ_METHOD if set, else the default. Both share the orientation of
+    xT: expected run value from the pitcher's view, LOWER = BETTER.
+    """
+    if method is None:
+        method = resolve_adj_method()
+        if method != ADJ_METHOD_DEFAULT:
+            print(f"*** STUFFPLUS_ADJ_METHOD={method}: adjT is NOT the adopted criterion "
+                  f"({ADJ_METHOD_DEFAULT}) in this run ***")
+    if method == "global":
+        import league_strength as ls   # local import: league_strength must not need fc
+        return ls.add_global_criterion(df, K, out_col="adjT")
+    if method == "within_league":
+        return add_adjusted_within_league(df, K)
+    raise ValueError(f"unknown adjustment method {method!r}; expected one of {ADJ_METHODS}")
+
+
+def add_adjusted_within_league(df, K=BATTER_K):
+    """The C2 used through 2026-10-28, kept for comparison. NOT the adopted criterion.
+
+    Adds adjT in place: xT minus league mean and shrunk batter effect, recentered on the
+    grand mean. Leagues under 5000 rows fall back to grand mean. Batter effects are pooled
+    across every season in the frame, and because both are measured within a league, this
+    cannot see how strong a league is (see league_strength.py and RESULTS.md, script 17).
+    """
     val = df["xT"].notna()
     grand = df.loc[val, "xT"].mean()
     counts = df.loc[val, "League"].value_counts()
@@ -752,8 +809,13 @@ def panel_ids(ff, min_n=PANEL_MIN_FF):
 
 def ff_panel(args):
     """Full chain with caching: slim FF pitch frame with xT, adjT, ridge_pred,
-    plate location, count, and panel membership. This is what scripts 02-07 load."""
-    cache = os.path.join(args.workdir, f"ff_panel{_year_suffix(args)}.parquet")
+    plate location, count, and panel membership. This is what scripts 02-07 load.
+
+    The cache name carries the adjustment method because the cache stores adjT: a panel
+    written before 2026-10-29 holds the within-league adjT under the same column name, and
+    serving it would silently grade everything against the retired criterion."""
+    cache = os.path.join(args.workdir,
+                         f"ff_panel{_year_suffix(args)}_adj-{resolve_adj_method()}.parquet")
     if os.path.exists(cache):
         return pd.read_parquet(cache)
     df = load_pitches(args)

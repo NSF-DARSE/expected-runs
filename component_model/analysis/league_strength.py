@@ -1,6 +1,10 @@
 """League-strength machinery: conference assignment, linkage, and a joint ridge fit.
 
-Why this exists. fair_criterion.add_adjusted builds adjT by subtracting each game's
+ADOPTED 2026-10-29: add_global_criterion below is what fair_criterion.add_adjusted now
+returns as adjT. The paragraph that follows describes the within-league version it
+replaced (fair_criterion.add_adjusted_within_league).
+
+Why this exists. fair_criterion.add_adjusted built adjT by subtracting each game's
 League mean xT and a batter effect measured against the batter's OWN league mean. In a
 closed league every run a pitcher allows is a run that league's hitters score, so league
 mean xT comes out roughly equal across leagues whatever their strength, and a batter
@@ -336,3 +340,91 @@ def poisson_game_weights(game_codes, n_games, rng):
     """
     gw = rng.poisson(1.0, n_games).astype(float)
     return gw[game_codes]
+
+
+# ---------------- the adopted criterion (fair_criterion.add_adjusted) ----------------
+#
+# Adopted 2026-10-29 as the project's C2 (adjT), replacing the within-league adjustment
+# (now fair_criterion.add_adjusted_within_league). Script 17 and fair_criterion both build
+# it through fit_season below, so the criterion the research reports on and the one every
+# scorer consumes cannot drift apart.
+
+CONF_LAM = 10.0     # near-free conference terms: identified by cross-league games
+HOME_LAM = 1.0      # two levels (batting away / at home), barely penalized
+CONTEXT = ["bconf", "batter", "park", "home"]   # what the criterion subtracts; pitcher
+                                                # and pitcher-conference terms stay in
+
+
+def assign_conferences(df, year_col="year"):
+    """Adds home_team, away_team, bat_home, bat_conf and pit_conf in place.
+
+    Conference per (season, team) comes from team_conferences over every season in the
+    frame, so a team with no TrackMan park this season borrows the nearest other season's
+    home-game conference. Games whose League is missing are left out of the assignment
+    (a handful of rows; a team whose only home games had none would otherwise have an
+    empty mode). Returns (games, confs).
+    """
+    add_home_away(df)
+    games = game_table(df, year_col)
+    confs = team_conferences(games[games["League"].notna()], year_col)
+    cm = confs.set_index([year_col, "team"])["conf"]
+    for side, team_col in (("bat_conf", "BatterTeam"), ("pit_conf", "PitcherTeam")):
+        df[side] = cm.reindex(pd.MultiIndex.from_arrays(
+            [df[year_col], df[team_col]])).fillna(UNKNOWN_CONF).values
+    return games, confs
+
+
+def season_blocks(sub, K):
+    """The six factor blocks of the joint model for one season's rows.
+
+    K is the ridge penalty on individual pitcher, batter and park effects (BATTER_K in
+    fair_criterion). The batter key is name plus team, as the within-league adjustment
+    used; a row with no batter name gets no batter effect rather than a shared 'nan' one.
+    """
+    bk = np.where(sub["Batter"].notna(),
+                  sub["Batter"].astype(str) + "|" + sub["BatterTeam"].astype(str), None)
+    return [Block("pconf", encode(sub["pit_conf"])[0], CONF_LAM),
+            Block("bconf", encode(sub["bat_conf"])[0], CONF_LAM),
+            Block("pitcher", encode(sub["PitcherId"])[0], K),
+            Block("batter", encode(bk)[0], K),
+            Block("park", encode(sub["home_team"])[0], K),
+            Block("home", encode(sub["bat_home"])[0], HOME_LAM)]
+
+
+def fit_season(sub, K, **fit_kw):
+    """Joint fit on one season's rows (xT must be present on every row).
+
+    Returns (criterion, fit, blocks, design). The criterion is xT minus the fitted CONTEXT,
+    recentered on the season's mean xT. ORIENTATION: LOWER = BETTER for the pitcher, as
+    for xT. A pitch thrown to tougher hitters (positive context) has its criterion
+    LOWERED, so the pitcher is credited for the opponent.
+    """
+    if sub["xT"].isna().any():
+        raise ValueError("fit_season needs xT on every row; filter missing xT first")
+    blocks = season_blocks(sub, K)
+    X = design(blocks, len(sub))
+    fit = fit_joint(sub["xT"].values, blocks, design_cache=X, **fit_kw)
+    ctx = context_effect(fit, blocks, CONTEXT)
+    return global_criterion(sub["xT"].values, ctx), fit, blocks, X
+
+
+def add_global_criterion(df, K, out_col="adjT", year_col="year", verbose=True):
+    """Writes the league-strength-adjusted criterion to df[out_col], in place.
+
+    Fit separately on each season in the frame using only that season, so no season's
+    results inform another season's criterion (the within-league version pooled batter
+    effects across every season in the frame). Rows with missing xT get NaN.
+    """
+    assign_conferences(df, year_col)
+    df[out_col] = np.nan
+    for yr in sorted(df[year_col].dropna().unique()):
+        m = ((df[year_col] == yr) & df["xT"].notna()).values
+        if not m.any():
+            continue
+        crit, fit, _, _ = fit_season(df.loc[m], K)
+        df.loc[m, out_col] = crit
+        if verbose:
+            print(f"  adjT (league-strength adjusted): season {yr}, {int(m.sum()):,} "
+                  f"pitches, {len(fit.effects['bconf'])} conferences, CG "
+                  f"{fit.iterations} iterations")
+    return df

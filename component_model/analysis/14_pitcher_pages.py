@@ -455,9 +455,9 @@ def main() -> int:
     args = fc.paths()
     pit = fc.load_pitches(args)
     fc.add_xt(pit)
-    # Needed for per-type adjusted results: xT with the league mean and a shrunk
-    # batter effect removed, so the column reflects the pitcher rather than who
-    # he happened to face.
+    # Needed for per-type adjusted results: xT with the fitted batter, conference,
+    # park and home effects removed (the league-strength adjT adopted 2026-10-29),
+    # so the column reflects the pitcher rather than who he happened to face.
     fc.add_adjusted(pit)
     fc.add_count_cols(pit)
 

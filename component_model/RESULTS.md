@@ -588,3 +588,192 @@ stable 26.3%, captured 64.1%). Part C, naming the missing channel, was
 scoped out pending this result.
 Script: component_model/analysis/12_reliability_decomposition.py
 (estimator + tests: variance_components.py, tests/).
+
+## Conference strength and the fair criterion (script 17, 2026-10-29)
+
+Question: adjT (C2) subtracts each game's League mean xT and a batter effect measured
+against the batter's own league mean. Within a closed conference those means cannot see
+how strong the conference is, so C2 may grade a weak-conference pitcher too kindly. Four-
+seam, D1, 2024 to 2026. Nothing shipped changes here; add_adjusted is untouched.
+
+What League holds. It is a property of the game: one value per game (one exception in
+16,422), and it is the home team's conference. A team's home games sit under one League
+98% of the time (median 100%), while its away games scatter across opponents (median
+55%). A team's conference is therefore the modal League of its home games. Teams with no
+TrackMan home park borrow their conference from another season's home games, then from a
+confident away-game mode, and otherwise go to an unknown group (3.5 to 4.0% of pitches by
+batting team). Conference names are TrackMan's codes.
+
+Linkage. Non-conference games are what separate "this conference hits well" from "this
+conference pitches badly". There are plenty: 2,135 of 4,540 games in 2024, 2,463 of 5,570
+in 2025 and 2,715 of 6,312 in 2026 are cross-conference, over 239 to 280 linked
+conference pairs. The conference graph is a single connected component in every season.
+The thinnest links are SWAC (6 cross-conference games in 2024, 19 in 2025) and NEC (13 in
+2026), and their intervals below are correspondingly wide.
+
+Method 2, the joint fit. Pitch-level xT on pitcher, pitcher conference, batter, batter
+conference, park (home team) and batting-at-home effects, all against one global mean,
+ridge-penalized (individual and park effects K = 100 as in BATTER_K; conference terms
+penalty 10, so they are estimated almost freely from cross-conference games). Fit
+separately on each season, using only that season. The conference terms are essential:
+with only individual effects the ridge penalty pulls every conference-wide shift toward
+zero, which the synthetic tests in tests/test_league_strength.py show directly. The
+candidate criterion adjT_global (G) is xT minus the fitted batter, batter-conference,
+park and home effects, recentered on mean xT. Lower is better, as for every criterion.
+
+Conference strength, batter side, in run value per 100 pitches against the D1 average
+(higher means tougher hitters). Three-season average with 95% game-cluster bootstrap
+intervals (200 refits per season), with the method 3 cross-check alongside:
+
+| conference | joint fit (m2) | 95% CI | Pitching+ residual (m3) | 95% CI |
+|---|---|---|---|---|
+| SEC | +0.94 | [+0.83, +1.03] | +0.77 | [+0.70, +0.88] |
+| ACC | +0.75 | [+0.62, +0.86] | +0.90 | [+0.78, +1.01] |
+| PAC12 | +0.73 | [+0.37, +1.02] | +0.35 | [+0.02, +0.65] |
+| BIG12 | +0.56 | [+0.43, +0.69] | +0.71 | [+0.60, +0.82] |
+| BIG10 | +0.31 | [+0.18, +0.41] | +0.45 | [+0.34, +0.54] |
+| BW | +0.06 | [-0.14, +0.22] | -0.38 | [-0.53, -0.22] |
+| AMER | -0.01 | [-0.16, +0.11] | -0.12 | [-0.26, +0.01] |
+| SBELT | -0.01 | [-0.15, +0.12] | -0.21 | [-0.31, -0.09] |
+| CUSA | -0.02 | [-0.14, +0.14] | +0.08 | [-0.05, +0.24] |
+| SOCON | -0.03 | [-0.21, +0.17] | -0.11 | [-0.29, +0.09] |
+| SLAND | -0.22 | [-0.44, +0.03] | -0.40 | [-0.63, -0.21] |
+| WAC | -0.25 | [-0.43, -0.07] | -0.32 | [-0.47, -0.15] |
+| CAA | -0.38 | [-0.53, -0.22] | -0.13 | [-0.26, +0.00] |
+| WCC | -0.40 | [-0.57, -0.25] | -0.67 | [-0.81, -0.55] |
+| BEAST | -0.41 | [-0.61, -0.23] | -0.25 | [-0.44, -0.07] |
+| MVC | -0.42 | [-0.56, -0.24] | -0.11 | [-0.25, +0.05] |
+| MW | -0.43 | [-0.66, -0.23] | -0.45 | [-0.62, -0.30] |
+| A10 | -0.45 | [-0.62, -0.31] | -0.36 | [-0.50, -0.24] |
+| BSOU | -0.46 | [-0.63, -0.29] | -0.38 | [-0.55, -0.18] |
+| ASUN | -0.51 | [-0.66, -0.33] | -0.29 | [-0.45, -0.14] |
+| MAC | -0.59 | [-0.79, -0.43] | -0.39 | [-0.62, -0.19] |
+| OVC | -0.65 | [-0.87, -0.44] | -0.65 | [-0.88, -0.50] |
+| AMEAST | -0.75 | [-1.03, -0.44] | -0.25 | [-0.57, +0.03] |
+| SWAC | -0.77 | [-1.42, +0.02] | -0.97 | [-1.63, -0.31] |
+| HORZ | -0.87 | [-1.09, -0.63] | -0.81 | [-1.03, -0.56] |
+| PAT | -1.02 | [-1.30, -0.73] | -0.66 | [-0.88, -0.43] |
+| SUM | -1.07 | [-1.50, -0.59] | -0.69 | [-1.07, -0.27] |
+| IVY | -1.09 | [-1.28, -0.86] | -0.54 | [-0.74, -0.34] |
+| NEC | -1.39 | [-1.79, -1.05] | -1.30 | [-1.77, -0.91] |
+| MAAC (2026 only) | -1.39 | [-1.89, -0.92] | -1.74 | [-2.11, -1.27] |
+
+PAC12 is not one conference across the three seasons: after 2024 it is two programs, and
+its 2025 value (+1.61) rests on very few teams. The spread is about 0.6 to 0.65 per 100
+pitches (sd across conferences) in every season, and the SEC-to-NEC gap is about 2.3 per
+100 pitches. The fitted pitcher-side conference effects run the other way (correlation
+-0.73 to -0.88 with the batter side): conferences that hit well also pitch well, which is
+why conference mean xT carries little of the gap.
+
+Method 3 cross-check. Mean residual of four-seam xT after a pooled fit on the fixed
+Stuff+ ridge and pooled Location+ (both coefficients positive, as required), by batter
+conference. Rank agreement with method 2 is Spearman 0.79, 0.80 and 0.74 by season
+(paired bootstrap intervals roughly [0.52, 0.88]) and 0.82 on the three-season average.
+The slope of method 3 on method 2 is 0.74 to 0.83: method 3 compresses the gap, as
+expected when strong programs also recruit pitching skill Pitching+ does not measure.
+Two methods with different identifying sources agree on the order. Method 3 is a check
+only; grading Pitching+ against a criterion built from Pitching+ would be circular.
+
+The premise is partly wrong. League mean xT is not flat: its sd across conferences is
+0.26 to 0.41 per 100 and it correlates +0.14 to +0.26 with batter-side strength. The
+calibration below puts a number on it: C2 removes 37% (2025) and 45% (2026) of opponent
+conference strength and leaves the rest in.
+
+Out-of-season calibration (added because the mover test below is underpowered). Take the
+season-t conference strengths, then look at season t+1 pitches with pitcher-season fixed
+effects and season-t park and home controls, so the only variation left is one pitcher
+facing different conferences. Nothing from t+1 informs the strengths. The slope of xT on
+opponent strength is +0.80 (SE 0.04) for 2024 strengths on 2025 results and +0.97 (SE
+0.04) for 2025 on 2026, so the strengths hold up out of sample at roughly the right
+scale. C2's slope is +0.51 and +0.53 (SE 0.04): about half of opponent conference
+strength is still in the shipped criterion. G's slope is +0.01 and +0.00, close to zero
+by construction and shown only as a check.
+
+Reliability and validity. Panel is pitchers with 100+ qualifying four-seams in both
+seasons (650 for 2024 to 2025, 828 for 2025 to 2026). C2 is refit per season so no
+criterion sees another season; the pooled-frame C2 that scripts 01 and 12 use tracks it
+within 0.01 everywhere. Paired bootstrap over pitchers, 2000 reps; values are the mean
+over both pairs.
+
+| metric | xT | C2 | G | G minus C2 (SE) |
+|---|---|---|---|---|
+| reliability r(C_t, C_t+1) | 0.265 | 0.283 | 0.318 | +0.034 (0.006) |
+| Stuff+ validity r(ridge_t, C_t+1) | 0.207 | 0.253 | 0.291 | +0.037 (0.005) |
+| Location+ validity r(loc_t, C_t+1) | 0.256 | 0.273 | 0.289 | +0.016 (0.005) |
+| Stuff+ increment over own-criterion baseline | 0.040 | 0.060 | 0.066 | +0.006 (0.004) |
+
+Each pair goes the same direction (reliability +0.041 and +0.028, Stuff+ validity +0.033
+and +0.042). Reliability rises when a stable context term is removed, the opposite of
+what removing context usually does. That fits the opposing signs above: in C2, a good
+pitcher in a strong conference partly cancels against his tough schedule, and G
+separates the two again.
+
+Decomposition audit. Most of the validity gain is between conferences. Among conference
+stayers, Stuff+ validity within conference moves only from 0.199 to 0.207 (2024 to 2025)
+and 0.167 to 0.186 (2025 to 2026), against 0.272 to 0.303 and 0.247 to 0.298 overall.
+Stuff+ correlates -0.43 and -0.36 with the conference strength a pitcher faces next
+season, meaning better physical stuff sits in tougher conferences. The gain comes from G
+no longer charging those pitchers for their schedule. That is a valid gain only if the
+strength estimates are right, which is what the next two tests ask. The gain does not
+make Stuff+ more useful relative to results: last season's own criterion improves by
+about as much, and Stuff+'s increment over that baseline is a tie (+0.006, SE 0.004).
+
+The deciding test: conference movers. 242 panel pitcher-pairs change conference (103 for
+2024 to 2025, 139 for 2025 to 2026): 163 changed team and 79 stayed with a team that
+realigned. 156 moved to tougher hitters and 86 to easier ones; the opponent strength they
+faced changed by a mean of +0.16 per 100 (sd 0.41). The residual is next season's
+criterion minus what the stayers' year-to-year regression predicts, which absorbs
+regression to the mean. A correct adjustment should leave no relationship between that
+residual and the change in strength faced.
+
+| movers | xT | C2 | G | G minus C2 (SE) |
+|---|---|---|---|---|
+| mean residual, to tougher hitters (per 100) | +0.13 | -0.07 | -0.21 | -0.14 (0.03) |
+| mean residual, to easier hitters (per 100) | -0.55 | -0.42 | -0.36 | +0.07 (0.04) |
+| slope of residual on change in strength | +0.29 | -0.14 | -0.47 | -0.33 (0.05) |
+| same, controlling change in Stuff+ and Location+ | +0.36 | -0.07 | -0.40 | -0.34 (0.05) |
+| RMSE predicting movers / sd of criterion | 0.973 | 0.972 | 0.959 | -0.013 (0.014) |
+| year-over-year r, movers | 0.274 | 0.307 | 0.337 | +0.030 (0.015) |
+
+The bootstrap SE of each slope on its own is about 0.28 to 0.29. The paired SE on G minus
+C2 is small only because the two criteria differ by a nearly fixed adjustment; it does
+not say which one is right. Read alone, the test leans against G. C2's slope is 0.5 SE
+from zero, G's is 1.6 SE below zero (it over-corrects), and G's slope is closer to zero
+in only 14.5% of bootstrap reps. G predicts movers slightly better in correlation, but
+stayers gain more (+0.038), so the mover-specific gain is -0.007 (SE 0.017), none.
+Splitting movers into team changes and realignment, or controlling for the change in
+physical stuff, does not change the picture.
+
+The discrepancy that matters. Within a season, one pitcher's xT moves about one-for-one
+with opponent strength (calibration slope 0.80 to 0.97). Across seasons, a mover's season
+mean moves only about 0.3 per unit of change in strength (SE 0.29), about 2 SE below
+that. Selection on a lucky or unlucky season would push the mover slope up, not down, so
+it does not explain the gap. Two explanations fit and the data cannot yet separate them.
+Pitchers who move up may also be improving in ways the physical scores do not capture,
+for example development at a stronger program. Or non-conference games, which identify
+the strengths, differ systematically from conference play (early-season dates, midweek
+arms, neutral sites), so the strengths fit those games and carry only partly to a full
+season.
+
+VERDICT: do not adopt G yet. Two pieces of evidence with different sources (the joint
+fit's cross-conference identification and the Pitching+ residual cross-check) agree on
+the conference order. Out-of-sample calibration says C2 still carries about half of
+opponent conference strength. G is 3 to 7 SE better on reliability and on Stuff+ and
+Location+ validity. But the gain is almost entirely between conferences, it gives Stuff+
+no advantage over results, and the one test that uses pitchers as their own control
+across seasons does not confirm it: at the point estimate G over-corrects. That test has
+n = 242 and a slope SE near 0.29, so it is underpowered rather than decisive. Needs more
+data: the 2027 movers, read on this same slope as a fixed pre-registered test, would
+roughly double n. If the mover slope stays near 0.3, a partial adjustment (subtract a
+fraction of the conference term) is the natural candidate. Choosing that fraction from
+this mover sample would be fitting to the test, so it was not tried here.
+
+Caveats. Run on the current-schema caches (workdir_ext3 for 2024 and 2025, ext3_crit for
+2025 and 2026). The older workdir_2425_d1 and workdir_2526_d1 caches predate RelSpeed and
+cannot fit the shipped Stuff+ ridge; the script stops with a message if handed one.
+Conference membership is inferred from home games; teams without a TrackMan park borrow
+another season's conference, which assumes they did not realign in between. Park is the
+home team, so neutral-site games are charged to the host. The batter key is name plus
+team, as in add_adjusted.
+Script: component_model/analysis/17_league_strength.py (helper and synthetic-recovery
+tests: league_strength.py, tests/test_league_strength.py).

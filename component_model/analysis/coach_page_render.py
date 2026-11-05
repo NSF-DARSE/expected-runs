@@ -24,6 +24,7 @@ import json
 import math
 import os
 
+import numpy as np
 import pandas as pd
 
 import coach_model_paired as cp
@@ -356,43 +357,55 @@ def heatmap(g, value_col, row_label, col_label, vmax=None):
             f'<tbody>{"".join(body)}</tbody></table></div>')
 
 
-# Four series on one chart, so hue is spread rather than kept inside the brand blues:
-# three blues were indistinguishable at 2px. Amber carries Location+, and run value
-# stays deliberately neutral as the reference series. Checked with the dataviz validator
-# (light surface): CVD separation passes at worst-adjacent dE 13.5 protan / 17.7 normal.
-# Two flags are known and accepted -- the grey trips the chroma floor because it is meant
-# to read as neutral, and #00a0df sits at 2.88:1 contrast, which the direct label on every
-# line discharges. Dash patterns are redundant encoding so the lines survive greyscale.
 CURVE_STYLE = {
-    "blend":   ("#00539f", 3.0, "",     "Stuff+ and Location+"),
-    "stuff":   ("#00a0df", 2.0, "",     "Stuff+"),
-    "loc":     ("#c87800", 2.2, "7 4",  "Location+"),
-    "results": ("#6f6f6f", 2.0, "2 3",  "2025 Expected Runs Allowed"),
+    "blend":   ("#003c71", 3.0, "",     "Stuff+ and Location+"),
+    "stuff":   ("#00539f", 3.0, "",     "Stuff+"),
+    "loc":     ("#00a0df", 3.0, "",     "Location+"),
+    "results": ("#bdbdbd", 3.0, "",     "2025 adjusted run value"),
+    "pitch":   ("#003c71", 3.0, "6 4",  "Pitching+, equal weights"),
+    "naware":  ("#ffd200", 4.5, "",     "Pitching+, sample-size aware"),
 }
+# Brand palette (2026-11): the sample-size-aware Pitching+ is the one UD Yellow line; the
+# equal-weight Pitching+ is Dark Navy, dashed so it separates from Stuff+ in greyscale. The
+# single grades are UD Blue and Light Blue, and adjusted results are Cool Gray. Every line
+# is direct-labelled. The two Pitching+ lines coincide from 200 four-seams on, where every
+# sample-size weight is 1; yellow is drawn last so it stays visible there.
+
+# Curves drawn, back to front. "Stuff+ and Location+" (no results component) is still
+# computed and cached but not drawn: a sixth line costs more than it shows.
+CURVES = ("results", "loc", "stuff", "pitch", "naware")
 
 
-# Curves drawn on the sample-size chart, in back-to-front order. The combined
-# "Stuff+ and Location+" line is deliberately OMITTED: it tracks Location+ closely at
-# high volume (the two converge because independent signals add in quadrature, so a
-# fixed-strength Stuff+ contributes a shrinking absolute amount as Location+ grows),
-# and a coach reading four lines where two nearly coincide loses the one comparison
-# that matters -- how fast each single grade reaches a full season of results.
-# Re-add "blend" here to restore it; the data is still computed and cached.
-CURVES = ("results", "loc", "stuff")
+def _left_labels(out, anchors, lx, floor_y):
+    """Labels at the left end of each line, separated greedily, with a short leader back
+    to the line when a label had to move."""
+    labels = sorted(anchors)
+    placed, prev = [], -1e9
+    for anchor, text, col in labels:
+        pos = max(anchor, prev + 17)
+        placed.append((anchor, pos, text, col))
+        prev = pos
+    shift = max(0.0, placed[-1][1] - floor_y)
+    for anchor, pos, text, col in placed:
+        pos -= shift
+        if abs(pos - anchor) > 1.5:
+            out.append(f'<path d="M {lx + 4:.1f} {pos:.1f} L {lx + 9:.1f} {anchor:.1f}" '
+                       f'stroke="{col}" stroke-width="1" fill="none" opacity="0.55"/>')
+        out.append(f'<text x="{lx:.1f}" y="{pos + 4:.1f}" text-anchor="end" '
+                   f'font-size="12.5" font-weight="600" fill="{INK}">{text}</text>')
 
 
-def line_chart(cv, width=800, height=340, pad_l=208, pad_b=46, pad_t=14, pad_r=54):
+def line_chart(cv, width=800, height=340, pad_l=230, pad_b=46, pad_t=14, pad_r=54):
     """Validity against next season vs how many fastballs the grade was built from.
 
-    X is LOG-scaled because the interesting region is 10 to 100 pitches, which a linear
-    axis would crush into the left margin. Y is correlation with next season's realized
-    run value.
-
-    No uncertainty bands: four overlapping ribbons were less legible than the lines they
-    described. The SE range lives in the caption instead.
+    X is LOG-scaled because the interesting region is 10 to 100 pitches. Y is correlation
+    with next season's adjusted run value. No uncertainty bands: five overlapping ribbons
+    were less legible than the lines they described. SEs live in the caption.
     """
-    grid, ref = cv["grid"], cv["reference"]
-    lo_x, hi_x, hi_y = math.log(grid[0]), math.log(grid[-1]), 0.20
+    grid = cv["grid"]
+    top = max(max(cv["curves"][k]["r"]) for k in CURVES)
+    hi_y = math.ceil(top / 0.1 + 0.3) * 0.1
+    lo_x, hi_x = math.log(grid[0]), math.log(grid[-1])
     iw, ih = width - pad_l - pad_r, height - pad_b - pad_t
 
     def x(n):
@@ -401,27 +414,23 @@ def line_chart(cv, width=800, height=340, pad_l=208, pad_b=46, pad_t=14, pad_r=5
     def y(v):
         return pad_t + ih * (1 - min(hi_y, max(0.0, v)) / hi_y)
 
-    out = [f'<svg viewBox="0 0 {width} {height}" width="100%" height="{height}" '
+    out = [f'<svg viewBox="0 0 {width} {height}" width="100%" '
            f'role="img" aria-label="Predictive validity versus sample size">']
-    # y numbers sit on the RIGHT: the left margin is given over entirely to series labels,
-    # which are placed at the start of each line rather than the end (the curves are far
-    # better separated at 10 pitches than at 250, where two pairs nearly coincide).
-    for gv in (0.05, 0.10, 0.15, 0.20):
+    for gv in [0.1 * i for i in range(1, int(round(hi_y / 0.1)) + 1)]:
         out.append(f'<line x1="{pad_l}" y1="{y(gv):.1f}" x2="{pad_l + iw}" '
                    f'y2="{y(gv):.1f}" stroke="#eee" stroke-width="1"/>')
         out.append(f'<text x="{pad_l + iw + 9}" y="{y(gv) + 4:.1f}" '
-                   f'font-size="11.5" fill="{MUTED}">{gv:.2f}</text>')
-    for n in (10, 20, 50, 100, 250):
+                   f'font-size="11.5" fill="{MUTED}">{gv:.1f}</text>')
+    for n in [t for t in (10, 20, 50, 100, 250, 400) if t <= grid[-1]]:
         out.append(f'<text x="{x(n):.1f}" y="{height - pad_b + 20}" text-anchor="middle" '
                    f'font-size="11.5" fill="{MUTED}">{n}</text>')
     out.append(f'<text x="{pad_l + iw / 2:.1f}" y="{height - 6}" text-anchor="middle" '
-               f'font-size="12" fill="{MUTED}">2025 fastballs the measure is built from'
+               f'font-size="12" fill="{MUTED}">2025 four-seams the measure is built from'
                f'</text>')
     ymid = pad_t + ih / 2
     out.append(f'<text x="17" y="{ymid:.1f}" font-size="12" fill="{MUTED}" '
                f'text-anchor="middle" transform="rotate(-90 17 {ymid:.1f})">'
-               f'2025 correlation with 2026 expected runs &rarr;</text>')
-
+               f'correlation with 2026 adjusted run value &rarr;</text>')
     for key in CURVES:
         c = cv["curves"][key]
         col, wdt, dash, _ = CURVE_STYLE[key]
@@ -431,26 +440,87 @@ def line_chart(cv, width=800, height=340, pad_l=208, pad_b=46, pad_t=14, pad_r=5
                    f'stroke-linejoin="round"/>')
         out.append(f'<circle cx="{x(grid[0]):.1f}" cy="{y(c["r"][0]):.1f}" r="4" '
                    f'fill="{col}"/>')
+    _left_labels(out, [(y(cv["curves"][k]["r"][0]), CURVE_STYLE[k][3], CURVE_STYLE[k][0])
+                       for k in CURVES], x(grid[0]) - 12, height - pad_b - 4)
+    out.append("</svg>")
+    return "".join(out)
 
-    # Left-margin labels, anchored to where each line STARTS. Even here two can coincide
-    # (the blend opens at 0.100 against the reference at 0.102), so they are separated
-    # greedily and any label that had to move draws a leader back to its own line.
-    lx = x(grid[0]) - 12
-    labels = sorted((y(cv["curves"][k]["r"][0]), CURVE_STYLE[k][3], CURVE_STYLE[k][0])
-                    for k in CURVES)
-    placed, prev = [], -1e9
-    for anchor, text, col in labels:
+
+REL_CURVES = ("results", "loc", "stuff", "pitch", "naware")
+REL_LABEL = {"results": "Adjusted run value"}
+
+
+def reliability_chart(rs, width=800, height=360, pad_l=60, pad_b=46, pad_t=14, pad_r=210):
+    """Within-season reliability n / (n + n0) on a linear 0-500 axis, with each measure's
+    pitcher-bootstrap band, and the empirical split-half checks overlaid as points with
+    their 95% intervals. Labels sit at the RIGHT end, where the lines are best separated."""
+    grid = rs["grid"]
+    x_end = 500
+    iw, ih = width - pad_l - pad_r, height - pad_b - pad_t
+
+    def x(n):
+        return pad_l + iw * n / x_end
+
+    def y(v):
+        return pad_t + ih * (1 - min(1.0, max(0.0, v)))
+
+    out = [f'<svg viewBox="0 0 {width} {height}" width="100%" '
+           f'role="img" aria-label="Within-season reliability versus sample size">']
+    for gv in (0.25, 0.5, 0.75, 1.0):
+        out.append(f'<line x1="{pad_l}" y1="{y(gv):.1f}" x2="{pad_l + iw}" '
+                   f'y2="{y(gv):.1f}" stroke="#eee" stroke-width="1"/>')
+        out.append(f'<text x="{pad_l - 9}" y="{y(gv) + 4:.1f}" text-anchor="end" '
+                   f'font-size="11.5" fill="{MUTED}">{gv:.2f}</text>')
+    for n in (0, 100, 200, 300, 400, 500):
+        out.append(f'<text x="{x(n):.1f}" y="{height - pad_b + 20}" text-anchor="middle" '
+                   f'font-size="11.5" fill="{MUTED}">{n}</text>')
+    out.append(f'<text x="{pad_l + iw / 2:.1f}" y="{height - 6}" text-anchor="middle" '
+               f'font-size="12" fill="{MUTED}">four-seams in the season</text>')
+    ymid = pad_t + ih / 2
+    out.append(f'<text x="15" y="{ymid:.1f}" font-size="12" fill="{MUTED}" '
+               f'text-anchor="middle" transform="rotate(-90 15 {ymid:.1f})">'
+               f'reliability within the season &rarr;</text>')
+    for key in REL_CURVES:
+        m = rs["measures"][key]
+        col = CURVE_STYLE[key][0]
+        up = " ".join(f"{x(n):.1f},{y(v):.1f}" for n, v in zip(grid, m["hi"]))
+        dn = " ".join(f"{x(n):.1f},{y(v):.1f}" for n, v in
+                      reversed(list(zip(grid, m["lo"]))))
+        out.append(f'<polygon points="{x(0):.1f},{y(0):.1f} {up} {dn}" fill="{col}" '
+                   f'opacity="0.13"/>')
+    for key in REL_CURVES:
+        m = rs["measures"][key]
+        col, wdt, dash, _ = CURVE_STYLE[key]
+        pts = f"{x(0):.1f},{y(0):.1f} " + " ".join(
+            f"{x(n):.1f},{y(v):.1f}" for n, v in zip(grid, m["rel"]))
+        out.append(f'<polyline points="{pts}" fill="none" stroke="{col}" '
+                   f'stroke-width="{wdt}" stroke-dasharray="{dash}" '
+                   f'stroke-linejoin="round"/>')
+    # empirical split-half checks: open markers, offset slightly so they do not stack
+    offs = {k: (i - 2) * 5 for i, k in enumerate(REL_CURVES)}
+    for n, e in rs["empirical"].items():
+        n = int(n)
+        for key in REL_CURVES:
+            col = CURVE_STYLE[key][0]
+            stroke = "#8a6d00" if key == "naware" else col
+            cx = x(n) + offs[key]
+            out.append(f'<line x1="{cx:.1f}" y1="{y(e["lo"][key]):.1f}" x2="{cx:.1f}" '
+                       f'y2="{y(e["hi"][key]):.1f}" stroke="{stroke}" stroke-width="1.2"/>')
+            out.append(f'<circle cx="{cx:.1f}" cy="{y(e["rel"][key]):.1f}" r="4" '
+                       f'fill="#fff" stroke="{stroke}" stroke-width="2"/>')
+    # right-end labels
+    rx = x(x_end) + 10
+    anchors = sorted((y(rs["measures"][k]["rel"][-1]), k) for k in REL_CURVES)
+    prev = -1e9
+    for anchor, k in anchors:
         pos = max(anchor, prev + 17)
-        placed.append((anchor, pos, text, col))
         prev = pos
-    shift = max(0.0, placed[-1][1] - (height - pad_b - 4))
-    for anchor, pos, text, col in placed:
-        pos -= shift
-        if abs(pos - anchor) > 1.5:      # nudged: connect it back to its own line
-            out.append(f'<path d="M {lx + 4:.1f} {pos:.1f} L {lx + 9:.1f} {anchor:.1f}" '
-                       f'stroke="{col}" stroke-width="1" fill="none" opacity="0.55"/>')
-        out.append(f'<text x="{lx:.1f}" y="{pos + 4:.1f}" text-anchor="end" '
-                   f'font-size="12.5" font-weight="600" fill="{INK}">{text}</text>')
+        if abs(pos - anchor) > 1.5:
+            out.append(f'<path d="M {rx - 8:.1f} {anchor:.1f} L {rx - 3:.1f} {pos:.1f}" '
+                       f'stroke="{CURVE_STYLE[k][0]}" stroke-width="1" fill="none"/>')
+        out.append(f'<text x="{rx:.1f}" y="{pos + 4:.1f}" font-size="12.5" '
+                   f'font-weight="600" fill="{INK}">'
+                   f'{REL_LABEL.get(k, CURVE_STYLE[k][3])}</text>')
     out.append("</svg>")
     return "".join(out)
 
@@ -683,6 +753,18 @@ def main() -> int:
         d = json.load(fh)
     with open(os.path.join(args.workdir, "coach_sample_curve.json")) as fh:
         cv = json.load(fh)
+    # optional within-season stability panel (coach_within_season_reliability.py)
+    rel_path = os.path.join(args.workdir, "within_season_reliability.json")
+    rel_section = ""
+    if os.path.exists(rel_path):
+        with open(rel_path) as fh:
+            rs = json.load(fh)
+        rel_section = (
+            f'<p class="sub">Stable within a season: how consistent each measure is between '
+            f'two halves of the same season (games alternated), by four-seams thrown. '
+            f'{rs["panel_pitchers"]} pitchers; shaded ranges are 95% intervals, open points '
+            f'are direct split-half checks on 2024 and 2025 seasons.</p>'
+            f'{reliability_chart(rs)}')
     with open(os.path.join(args.workdir, "coach_feature_importance.json")) as fh:
         fi = json.load(fh)
     # Location+ map: one input, so its "importance" is the map itself (see zone_map).
@@ -796,9 +878,13 @@ small number is how many pitchers are in the cell.</p>
 {heatmap(sx, "crit100_adjT", "Stuff+", "Location+", gmax("crit100_adjT"))}
 
 <h2>5. Pitches Required</h2>
-<p class="sub">How well you can predict following season Expected Runs allowed by how
-many pitches are observed. {cv['pool']} pitchers with {cv['n_max']}+ four-seams.</p>
+<p class="sub">How well each 2025 measure predicts a pitcher's 2026 adjusted run value
+(run value versus average, adjusted for opponent and league strength), by how many 2025
+four-seams it is built from. {cv['pool']} pitchers with {cv['n_max']}+ four-seams;
+each point averages {cv['reps']} random draws of the pitches. Next-season prediction is
+capped by year-to-year change in the pitcher, which more pitches cannot fix.</p>
 {line_chart(cv)}
+{rel_section}
 
 <h2>6. All of it side by side</h2>
 <p class="sub">Gap between the best-graded third and the worst-graded third, in runs per

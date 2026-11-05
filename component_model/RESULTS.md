@@ -15,6 +15,8 @@ Raw run value allowed is mostly noise (year-over-year r = 0.185). The evaluation
 target for everything below is C2: each ball in play replaced by its exit-speed /
 launch-angle expected run value (defense and batted-ball luck stripped), then
 opponent-adjusted with batter effects shrunk toward league means (K = 200).
+C2 was replaced on 2026-10-29 by a league-strength-adjusted version; the current anchors
+are in "Adopted: league-strength-adjusted adjT" at the end of this file.
 
 Anchor table. Script 01 must reproduce these before any other script is trusted:
 
@@ -777,3 +779,103 @@ home team, so neutral-site games are charged to the host. The batter key is name
 team, as in add_adjusted.
 Script: component_model/analysis/17_league_strength.py (helper and synthetic-recovery
 tests: league_strength.py, tests/test_league_strength.py).
+
+## Adopted: league-strength-adjusted adjT (2026-10-29)
+
+Jack adopted G as the project's C2 on 2026-10-29, overriding the "do not adopt yet"
+verdict above. The reliability and validity gains are 3 to 7 SE and consistent across
+both pairs. The conference-mover test that leaned against G has n = 242 and a slope SE
+near 0.29, which he judged too small to block adoption. The mover test stays the open
+check: read it again on the 2027 movers as planned above.
+
+What changed in code. fair_criterion.add_adjusted now returns adjT from the per-season
+joint fit (league_strength.add_global_criterion, through league_strength.fit_season,
+which script 17 also calls, so the research and the scorers share one code path). The
+column is still adjT and the orientation is unchanged: expected run value from the
+pitcher's view, lower is better. Two other changes come with it. Each season in a frame
+is fit on its own rows only, where the old version pooled batter effects across every
+season in the frame. A batter is shrunk toward his conference effect instead of his
+league mean, with the same K = 100. The old criterion is kept as
+add_adjusted_within_league, and STUFFPLUS_ADJ_METHOD=within_league switches a whole run
+back to it (a banner prints when it does). ff_panel's cache name now carries the method,
+so a panel cached before today cannot serve the old adjT under the new name.
+
+Script 17 rerun on the shared code path reproduces the table above to three decimals
+(reliability +0.034, SE 0.006; Stuff+ validity +0.037, SE 0.005; Location+ validity
++0.016, SE 0.005), so moving the fit into league_strength changed nothing. The rerun used
+20 game-cluster refits per season instead of 200, which only affects the conference
+interval and calibration SE columns. Calibration slopes match (C2 +0.51 and +0.53, G
++0.01 and +0.00), and so does the mover slope (G -0.47, C2 -0.14).
+
+Script 01 anchors on the current caches (D1, panel 100+ FF in both seasons). The old row
+is the within-league C2 as script 01 has always built it (one fit over the two-season
+frame); the new row is the adopted adjT.
+
+| pair | criterion | reliability | ridge -> C_t+1 | 50/50 blend -> C_t+1 |
+|---|---|---|---|---|
+| 2024 -> 2025 (n = 649) | C1 xT | 0.283 | 0.219 | 0.325 |
+| | C2 within-league (old) | 0.306 | 0.260 | 0.360 |
+| | C2 adopted | 0.349 | 0.297 | 0.407 |
+| 2025 -> 2026 (n = 828) | C1 xT | 0.231 | 0.200 | 0.276 |
+| | C2 within-league (old) | 0.251 | 0.235 | 0.308 |
+| | C2 adopted | 0.277 | 0.271 | 0.345 |
+
+C0 and C1 are unchanged by construction. The C1 to C2 cross-correlation falls from 0.984
+to 0.956 and 0.958: the adopted criterion moves further from raw xT than the old one
+did, which is the conference term it now removes. These are the anchors script 01 must
+reproduce from now on. The 2024 to 2025 table at the top of this file is the original
+build (n = 699, K = 200) and is kept as history.
+
+Incremental-validity gate (coach_incremental_gate.py, 2024+2025 grades vs the 2025 to
+2026 criterion build, 200 refits, bar P = 0.95). Mean blend gain over prior results and
+P(gain > 0), old then new:
+
+| type | old gain | old P | new gain | new P | verdict |
+|---|---|---|---|---|---|
+| FF | +0.068 | 1.000 | +0.074 | 1.000 | PASS, unchanged |
+| SI (pooled) | +0.046 | 0.890 | +0.060 | 0.925 | no, unchanged |
+| FC | +0.036 | 0.795 | +0.049 | 0.860 | no, unchanged |
+| SL | +0.056 | 1.000 | +0.067 | 1.000 | PASS, unchanged |
+| CB | +0.143 | 1.000 | +0.143 | 1.000 | PASS, unchanged |
+| CH | +0.060 | 1.000 | +0.063 | 1.000 | PASS, unchanged |
+
+Every verdict holds, so composite_eligible and display_eligible in the Pitching+
+contract do not move, and the provisional sinker ruling still applies (the gate still
+fails it). The old-criterion rerun reproduces the 2026-09-11 gate log exactly.
+
+Pitching+ contract (coach_pitching_plus_weights.py). The old-criterion rerun matches the
+published v4 contract to the last digit. Under the adopted criterion the display weights
+move by at most 0.030 (FF), 0.067 (SI), 0.022 (FC), 0.059 (SL), 0.037 (CB) and 0.042 (CH)
+anywhere on the n grid, always toward Stuff+. Four-seam at 250
+pitches goes from stuff 0.39 / location 0.45 / results 0.16 to 0.41 / 0.43 / 0.16. The
+pitch count at which results reach a quarter of the weight rises for FF (750 to 1000), SI
+(60 to 80) and SL (120 to 175). The closed-form blend R^2 rises for every type, by 0.006
+to 0.023 at the pitch counts checked (40 to 1000). The contract's generated block now records which criterion built it
+("criterion": "global"). CONTRACT_VERSION is unchanged because no field changed meaning.
+
+Shipped scores, not republished. 08_staff_scores.py and 14_pitcher_pages.py were rerun on
+the publish build (all levels, 2025 and 2026, the cache behind the 2026-09-10 bundle) with
+each criterion. Stuff+ and Location+ are identical. On the 18-arm DEL_BLU staff board,
+Adj Results moves by 1.6 points on average (max 5.6) on the 100 +/- 15 scale with Spearman
+0.988 old vs new; Pitch+ moves 1.0 on average (max 3.6), Spearman 0.997, and four arms
+swap one place on the board. The Runs Allowed and Expected Runs Allowed ladder rungs move
+about 0.5 points because they ride Adj Results' population mean and sd. On the pitcher
+pages, per-type Adj Results moves 1.6 to 2.0 points on average for FF, SL, CB, CH and FC
+and 3.5 for the sinker (max 7.0), Spearman 0.90 to 1.00 within type. Publishing is Jack's
+call; nothing was uploaded.
+
+Caveats. The evidence above is D1. The publish build includes D2, D3, JUCO and NAIA, and
+there the conference graph is not fully connected: 3 components in 2025 and 2 in 2026,
+with some lower-level conferences playing no cross-conference games in the feed. For
+those conferences the split between hitting and pitching strength is not identified, and
+the conference penalty splits the difference toward the global mean. That affects only
+non-D1 rows and, through them, the all-levels display scale. Scripts 12 and 13 and every
+dated section above this one were measured on the within-league criterion and were not
+rerun. The sinker's blind 2026 to 2027 read was locked as "same gate" when the gate used
+the within-league criterion; which criterion that read uses needs a ruling before the
+data arrives, and the clean option is to report both with the pre-registered one
+deciding. The BATTER_K sweep was run on the within-league version and was not repeated.
+The prose of the section above quotes 2,135 / 2,463 cross-conference games and 4,540 /
+5,570 games; the script 17 log (before and after this change) prints 2,129 / 2,474 /
+2,705 cross-conference games of 4,540 / 5,595 / 6,313. The table rows are unaffected.
+Outputs and logs: workdir_adopt_adjt_global (Level II, outside the repo).

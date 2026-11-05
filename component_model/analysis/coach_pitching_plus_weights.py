@@ -506,6 +506,9 @@ def main() -> int:
 
     out = {"contract_version": CONTRACT_VERSION,
            "generated": {"seasons": SEASONS, "train_year": TRAIN_YEAR,
+                         # Which adjT built the results component and the target
+                         # (fair_criterion.ADJ_METHODS; "global" since 2026-10-29).
+                         "criterion": fc.resolve_adj_method(),
                          "min_n_per_season": args.min_n, "splits": args.splits,
                          "min_half": args.min_half, "gate": gate_meta},
            "sign_convention": ("Every component and the criterion are expected run value from "

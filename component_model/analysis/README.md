@@ -37,7 +37,7 @@ Requires: pandas, pyarrow, numpy, scipy, scikit-learn.
 | `12_reliability_decomposition.py` | How much year-over-year unpredictability is noise vs skill Pitching+ misses? | pitch caches (`--caches`) |
 | `13_reliability_vs_sample_size.py` | Which metric (adjT, Stuff+, Location+, or a blend) predicts next-season adjT best at a GIVEN pitch count? Portal sample-size table. | pitch caches (`--caches`) |
 | `14_pitcher_pages.py` | Pitcher development page data: full-arsenal grades, per-pitch rows, outing trends (`--team`) | 01 pass |
-| `17_league_strength.py` | Does adjT see conference strength? Joint global-mean batter/park fit vs adjT, with conference strength, calibration and a conference-mover test (helper `league_strength.py`, tested) | pitch caches (`--caches`, must include RelSpeed) |
+| `17_league_strength.py` | Does adjT see conference strength? Joint global-mean batter/park fit (adopted as adjT 2026-10-29) vs the retired within-league adjT, with conference strength, calibration and a conference-mover test (helper `league_strength.py`, tested) | pitch caches (`--caches`, must include RelSpeed) |
 
 **Run 01 first, every time the source data changes.** If its prints do not match
 the anchor table in RESULTS.md, stop and reconcile before trusting anything else.
@@ -47,6 +47,11 @@ the anchor table in RESULTS.md, stop and reconcile before trusting anything else
 - Never commit workdir contents, derived TrackMan values, or per-pitcher output.
 - The fair criterion (xT/adjT) and the Stuff+ Ridge are FIXED references. Changing
   them invalidates every comparison; do it deliberately and re-anchor everything.
+  adjT changed once, deliberately, on 2026-10-29: `fair_criterion.add_adjusted` now
+  builds it from the league-strength joint fit (script 17). Results dated before then
+  were measured on the within-league adjT, which stays available as
+  `add_adjusted_within_league` or for a whole run via `STUFFPLUS_ADJ_METHOD=within_league`.
+  See RESULTS.md, "Adopted: league-strength-adjusted adjT".
 - Scope: four-seam fastballs, 2024→2025, n=699 qualified pitchers. Conclusions are
   provisional pending 2026 replication.
 - `variance_components.py` is unit-tested: `cd component_model/analysis && python -m pytest tests/ -v`.

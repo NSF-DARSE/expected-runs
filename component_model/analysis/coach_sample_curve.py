@@ -31,13 +31,21 @@ inside each draw, which is what licenses any claim that a grade matches a full s
 EFFICIENCY: each rep shuffles a pitcher's pitches ONCE and reads running means off the
 cumulative sum at every grid point, so one pass yields the whole curve.
 
-CRITERION: next season's mean raw `Target`. Ground truth, deliberately -- adjT was tested
-as a criterion (coach_measure_validity.py) and bought no predictive power, so using it here
-would be criterion-shopping.
+CRITERION: next season's mean `adjT`, the project's fair criterion (adjT_global since PR
+#38: league-strength-aware, joint pitcher+batter fit vs a global mean). The "results"
+measure is the same quantity built from the graded season's own pitches, so the chart
+asks how fast each grade reaches the criterion's own year-over-year signal. The August
+version used raw Target for both; STUFFPLUS_ADJ_METHOD=within_league reproduces the
+pre-#38 adjT for a before/after.
 
-SIGN CONVENTION: ridge_pred, the location value, and Target are ALL expected runs from the
+CROSSOVERS: for each pair of measures, the pitch count at which the slower-starting
+curve overtakes the other, interpolated on log(n). Reported as the point-estimate
+crossing plus the 2.5/50/97.5 percentiles across bootstrap draws (each draw a fresh
+shuffle and pitcher resample), with the share of draws that never cross within N_MAX.
+
+SIGN CONVENTION: ridge_pred, the location value, and adjT are ALL expected runs from the
 pitcher's perspective, LOWER = BETTER, and all three are used UNNEGATED as predictors.
-A better measure therefore has a LARGER POSITIVE correlation with next season's Target.
+A better measure therefore has a LARGER POSITIVE correlation with next season's adjT.
 Nothing is negated, so nothing can be double-negated.
 
 Data rules: reads workdir caches; writes one JSON to the workdir. No pitcher names.
@@ -45,6 +53,7 @@ Never committed.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 
@@ -57,37 +66,83 @@ import fair_criterion as fc
 N_MAX = 250          # pitchers must have at least this many graded four-seams
 CRIT_FLOOR = 100     # and this many in the following season
 GRID = [10, 15, 20, 30, 40, 50, 75, 100, 150, 200, 250]
-REPS = 60            # shuffles for the point estimate; r is averaged, never the values
-N_BOOT = 300         # draws for the band: each is a fresh shuffle + a pitcher resample
+REPS = 400           # shuffles for the point estimate; r is averaged, never the values
+N_BOOT = 1000        # draws for the band: each is a fresh shuffle + a pitcher resample
+# The August run used 60 / 300; METHODS.md Part C asked for more before citing.
+VALUE = "adjT"       # per-pitch run value used for both the criterion and "results"
 MEASURES = ["stuff", "loc", "blend", "results"]
 LABELS = {"stuff": "Stuff+", "loc": "Location+", "blend": "Stuff+ and Location+",
-          "results": "Actual results"}
+          "results": "2025 adjusted run value"}
 
 
 def load_pool():
     """Per-pitcher arrays of the three per-pitch quantities, plus the next-season
     criterion, for pitchers clearing both floors."""
-    s = ffc._frame(ffc.SCORE_WORKDIR, "2024,2025")
+    data, score_wd, crit_wd = fc.workdirs()
+    s = ffc._frame(data, score_wd, "2024,2025")
     s = s[(s["year"] == 2025) & s["ridge_pred"].notna() & s["loc"].notna()
-          & s["Target"].notna()]
+          & s[VALUE].notna()]
 
-    c = ffc._frame(ffc.CRIT_WORKDIR, "2025,2026")
+    # eval role 2025 of the 2025/2026 pair is the real 2026 season
+    c = ffc._frame(data, crit_wd, "2025,2026")
+    c = c[c[VALUE].notna()]
     k = c[c["year"] == 2025].groupby("PitcherId").agg(
-        n26=("Target", "size"), crit=("Target", "mean"))
+        n26=(VALUE, "size"), crit=(VALUE, "mean"))
     k = k[k["n26"] >= CRIT_FLOOR]
 
     counts = s.groupby("PitcherId").size()
     ids = counts[counts >= N_MAX].index.intersection(k.index)
     s = s[s["PitcherId"].isin(ids)]
     arrays = {pid: (g["ridge_pred"].to_numpy(), g["loc"].to_numpy(),
-                    g["Target"].to_numpy())
+                    g[VALUE].to_numpy())
               for pid, g in s.groupby("PitcherId")}
     crit = k.loc[list(arrays), "crit"].to_numpy() * 100.0
     print(f"  pool: {len(arrays)} pitchers with {N_MAX}+ graded four-seams and "
           f"{CRIT_FLOOR}+ the next season")
-    # full-season reference: each pitcher's realized results over ALL graded four-seams
     full = np.array([a[2].mean() for a in arrays.values()]) * 100.0
     return arrays, crit, full
+
+
+PAIRS = [("loc", "stuff"), ("results", "stuff"), ("results", "loc")]
+
+
+def crossing(r_up, r_down):
+    """First n (log-interpolated) where r_up rises to meet r_down; None if it never does.
+    0 if it already starts at or above."""
+    d = np.asarray(r_up) - np.asarray(r_down)
+    if d[0] >= 0:
+        return float(GRID[0])
+    for i in range(1, len(GRID)):
+        if d[i] >= 0:
+            t = -d[i - 1] / (d[i] - d[i - 1])
+            lo, hi = np.log(GRID[i - 1]), np.log(GRID[i])
+            return float(np.exp(lo + t * (hi - lo)))
+    return None
+
+
+def sb_fit(r):
+    """Fit r(n) = a * sqrt(n / (n + k)) (Spearman-Brown attenuation of a mean of n noisy
+    pitches) by least squares of 1/r^2 on 1/n. Returns (a^2, k), or None if any r <= 0."""
+    r = np.asarray(r, dtype=float)
+    if (r <= 0).any():
+        return None
+    slope, icpt = np.polyfit(1.0 / np.array(GRID), 1.0 / r ** 2, 1)
+    if icpt <= 0:
+        return None
+    return 1.0 / icpt, max(slope / icpt, 0.0)
+
+
+def sb_crossing(r_up, r_down, n_cap=20000):
+    """Pitch count where the fitted curves meet, extrapolating past N_MAX if needed.
+    Returns None when the fitted ceilings say the slower curve never catches up."""
+    fu, fd = sb_fit(r_up), sb_fit(r_down)
+    if fu is None or fd is None:
+        return None
+    (a2u, ku), (a2d, kd) = fu, fd
+    ns = np.exp(np.linspace(np.log(1), np.log(n_cap), 4000))
+    d = a2u * ns / (ns + ku) - a2d * ns / (ns + kd)
+    hit = np.nonzero(d >= 0)[0]
+    return float(ns[hit[0]]) if len(hit) else None
 
 
 def rep_means(arrays, rng):
@@ -103,6 +158,17 @@ def rep_means(arrays, rng):
 
 
 def main() -> int:
+    global REPS, N_BOOT, VALUE
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--value", default=VALUE, choices=["adjT", "Target"],
+                    help="Target reproduces the August raw-run-value version")
+    ap.add_argument("--reps", type=int, default=REPS)
+    ap.add_argument("--boot", type=int, default=N_BOOT)
+    ap.add_argument("--out", default=None, help="output dir (default: the score workdir)")
+    a = ap.parse_args()
+    REPS, N_BOOT, VALUE = a.reps, a.boot, a.value
+    if VALUE != "adjT":
+        LABELS["results"] = "2025 run value"
     arrays, crit, full = load_pool()
     if len(arrays) < 60:
         return print(f"pool of {len(arrays)} is too small for this curve; raise "
@@ -153,7 +219,7 @@ def main() -> int:
                 bse[m][b, gi] = r
                 bdiff[m][b, gi] = r - r_ref_b
 
-    print("\n  validity vs next season's raw Target (r, positive = sorts correctly)")
+    print(f"\n  validity vs next season's {VALUE} [{fc.resolve_adj_method()}] (r, positive = sorts correctly)")
     print(f"  {'pitches':>8}" + "".join(f"{LABELS[m]:>22}" for m in MEASURES))
     for gi, n in enumerate(GRID):
         line = f"  {n:>8}"
@@ -166,17 +232,41 @@ def main() -> int:
 
     print("\n  first sample size that MATCHES the full-season reference "
           "(paired, P(grade >= results) >= 0.05, i.e. not shown to be worse):")
-    crossing = {}
+    match = {}
     for m in MEASURES:
         hit = None
         for gi, n in enumerate(GRID):
             if (bdiff[m][:, gi] < 0).mean() <= 0.95:   # not significantly below
                 hit = n
                 break
-        crossing[m] = hit
+        match[m] = hit
         d = bdiff[m][:, GRID.index(hit)] if hit else None
         extra = (f"   (diff {d.mean():+.3f} +/-{d.std():.3f})" if hit is not None else "")
         print(f"    {LABELS[m]:<24}{hit if hit else 'not within ' + str(N_MAX)}{extra}")
+
+    cross = {}
+    print("\n  crossovers (pitches where the first measure overtakes the second):")
+    for up, dn in PAIRS:
+        pt = crossing(curves[up], curves[dn])
+        draws = [crossing(bse[up][b], bse[dn][b]) for b in range(N_BOOT)]
+        within = float(np.mean([v is not None for v in draws]))
+        # Fitted-curve crossing, extrapolated past N_MAX. Draws where the slower curve's
+        # fitted ceiling stays below the other's never cross; they enter the percentiles
+        # as +inf so the upper bound reads "never" rather than being silently dropped.
+        sb_pt = sb_crossing(curves[up], curves[dn])
+        sb = np.array([sb_crossing(bse[up][b], bse[dn][b]) for b in range(N_BOOT)],
+                      dtype=object)
+        sbv = np.array([np.inf if v is None else v for v in sb], dtype=float)
+        q = [float(v) for v in np.percentile(sbv, [2.5, 50, 97.5])]
+        cross[f"{up}_over_{dn}"] = dict(
+            grid_point=None if pt is None else round(pt, 1),
+            p_cross_within_n_max=round(within, 4),
+            fit_point=None if sb_pt is None else round(sb_pt, 1),
+            fit_q025_q50_q975=[None if not np.isfinite(v) else round(v, 1) for v in q],
+            fit_p_never=round(float(np.isinf(sbv).mean()), 4))
+        print(f"    {LABELS[up]} over {LABELS[dn]}: on grid {pt}, "
+              f"P(cross by {N_MAX}) {within:.1%}; fitted {sb_pt} "
+              f"[95%: {q[0]:.0f}, {q[2]:.0f}], P(never) {np.isinf(sbv).mean():.1%}")
 
     out = dict(pool=len(arrays), n_max=N_MAX, crit_floor=CRIT_FLOOR, grid=GRID,
                reps=REPS, n_boot=N_BOOT, mean_graded_pitches=round(n_full, 1),
@@ -191,10 +281,11 @@ def main() -> int:
                    p_below=[round(float((bdiff[m][:, gi] < 0).mean()), 4)
                             for gi in range(len(GRID))])
                    for m in MEASURES},
-               reference=dict(label="Full season of actual results", r=round(ref_r, 4),
-                              pitches=round(n_full, 1)),
-               crossing=crossing)
-    dest = os.path.join(ffc.SCORE_WORKDIR, "coach_sample_curve.json")
+               reference=dict(label="Full 2025 season of the criterion value",
+                              r=round(ref_r, 4), pitches=round(n_full, 1)),
+               crossing=match, crossovers=cross, criterion=VALUE,
+               adj_method=fc.resolve_adj_method())
+    dest = os.path.join(a.out or fc.workdirs()[1], "coach_sample_curve.json")
     with open(dest, "w") as fh:
         json.dump(out, fh, indent=1)
     print(f"\nwrote {dest}")

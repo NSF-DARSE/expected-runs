@@ -24,6 +24,7 @@ import json
 import math
 import os
 
+import numpy as np
 import pandas as pd
 
 import coach_model_paired as cp
@@ -364,11 +365,15 @@ def heatmap(g, value_col, row_label, col_label, vmax=None):
 # to read as neutral, and #00a0df sits at 2.88:1 contrast, which the direct label on every
 # line discharges. Dash patterns are redundant encoding so the lines survive greyscale.
 CURVE_STYLE = {
-    "blend":   ("#00539f", 3.0, "",     "Stuff+ and Location+"),
-    "stuff":   ("#00a0df", 2.0, "",     "Stuff+"),
-    "loc":     ("#c87800", 2.2, "7 4",  "Location+"),
-    "results": ("#6f6f6f", 2.0, "2 3",  "2025 Expected Runs Allowed"),
+    "blend":   ("#003c71", 3.0, "",     "Stuff+ and Location+"),
+    "stuff":   ("#00539f", 3.0, "",     "Stuff+"),
+    "loc":     ("#003c71", 2.4, "7 4",  "Location+"),
+    "results": ("#bdbdbd", 3.0, "",     "2025 adjusted run value"),
 }
+# Brand palette (2026-11): UD Blue carries Stuff+, Dark Navy dashed carries Location+, and
+# the results line is Cool Gray because it is the context series the grades are read
+# against. Dash pattern separates the two blues; every line is direct-labelled. The one
+# UD Yellow mark is the Location+/Stuff+ crossover dot, drawn only if the curves cross.
 
 
 # Curves drawn on the sample-size chart, in back-to-front order. The combined
@@ -392,7 +397,9 @@ def line_chart(cv, width=800, height=340, pad_l=208, pad_b=46, pad_t=14, pad_r=5
     described. The SE range lives in the caption instead.
     """
     grid, ref = cv["grid"], cv["reference"]
-    lo_x, hi_x, hi_y = math.log(grid[0]), math.log(grid[-1]), 0.20
+    top = max(max(cv["curves"][k]["r"]) for k in CURVES)
+    hi_y = math.ceil(top / 0.05 + 0.2) * 0.05
+    lo_x, hi_x = math.log(grid[0]), math.log(grid[-1])
     iw, ih = width - pad_l - pad_r, height - pad_b - pad_t
 
     def x(n):
@@ -406,7 +413,7 @@ def line_chart(cv, width=800, height=340, pad_l=208, pad_b=46, pad_t=14, pad_r=5
     # y numbers sit on the RIGHT: the left margin is given over entirely to series labels,
     # which are placed at the start of each line rather than the end (the curves are far
     # better separated at 10 pitches than at 250, where two pairs nearly coincide).
-    for gv in (0.05, 0.10, 0.15, 0.20):
+    for gv in [0.05 * i for i in range(1, int(round(hi_y / 0.05)) + 1)]:
         out.append(f'<line x1="{pad_l}" y1="{y(gv):.1f}" x2="{pad_l + iw}" '
                    f'y2="{y(gv):.1f}" stroke="#eee" stroke-width="1"/>')
         out.append(f'<text x="{pad_l + iw + 9}" y="{y(gv) + 4:.1f}" '
@@ -420,7 +427,7 @@ def line_chart(cv, width=800, height=340, pad_l=208, pad_b=46, pad_t=14, pad_r=5
     ymid = pad_t + ih / 2
     out.append(f'<text x="17" y="{ymid:.1f}" font-size="12" fill="{MUTED}" '
                f'text-anchor="middle" transform="rotate(-90 17 {ymid:.1f})">'
-               f'2025 correlation with 2026 expected runs &rarr;</text>')
+               f'correlation with 2026 adjusted run value &rarr;</text>')
 
     for key in CURVES:
         c = cv["curves"][key]
@@ -431,6 +438,15 @@ def line_chart(cv, width=800, height=340, pad_l=208, pad_b=46, pad_t=14, pad_r=5
                    f'stroke-linejoin="round"/>')
         out.append(f'<circle cx="{x(grid[0]):.1f}" cy="{y(c["r"][0]):.1f}" r="4" '
                    f'fill="{col}"/>')
+
+    co = cv.get("crossovers", {}).get("loc_over_stuff", {}).get("grid_point")
+    if co:
+        lg = [math.log(n) for n in grid]
+        rv = float(np.interp(math.log(co), lg, cv["curves"]["stuff"]["r"]))
+        out.append(f'<circle cx="{x(co):.1f}" cy="{y(rv):.1f}" r="6" fill="#ffd200" '
+                   f'stroke="#003c71" stroke-width="1"/>')
+        out.append(f'<text x="{x(co):.1f}" y="{y(rv) - 12:.1f}" text-anchor="middle" '
+                   f'font-size="11.5" fill="{INK}">{co:.0f} pitches</text>')
 
     # Left-margin labels, anchored to where each line STARTS. Even here two can coincide
     # (the blend opens at 0.100 against the reference at 0.102), so they are separated
@@ -796,8 +812,10 @@ small number is how many pitchers are in the cell.</p>
 {heatmap(sx, "crit100_adjT", "Stuff+", "Location+", gmax("crit100_adjT"))}
 
 <h2>5. Pitches Required</h2>
-<p class="sub">How well you can predict following season Expected Runs allowed by how
-many pitches are observed. {cv['pool']} pitchers with {cv['n_max']}+ four-seams.</p>
+<p class="sub">How well each 2025 measure predicts a pitcher's 2026 adjusted run value
+(run value versus average, adjusted for opponent and league strength), by how many 2025
+four-seams it is built from. {cv['pool']} pitchers with {cv['n_max']}+ four-seams;
+each point averages {cv['reps']} random draws of the pitches.</p>
 {line_chart(cv)}
 
 <h2>6. All of it side by side</h2>

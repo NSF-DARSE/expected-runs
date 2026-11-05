@@ -37,6 +37,7 @@ Requires: pandas, pyarrow, numpy, scipy, scikit-learn.
 | `12_reliability_decomposition.py` | How much year-over-year unpredictability is noise vs skill Pitching+ misses? | pitch caches (`--caches`) |
 | `13_reliability_vs_sample_size.py` | Which metric (adjT, Stuff+, Location+, or a blend) predicts next-season adjT best at a GIVEN pitch count? Portal sample-size table. | pitch caches (`--caches`) |
 | `14_pitcher_pages.py` | Pitcher development page data: full-arsenal grades, per-pitch rows, outing trends (`--team`) | 01 pass |
+| `17_league_strength.py` | Does adjT see conference strength? Joint global-mean batter/park fit vs adjT, with conference strength, calibration and a conference-mover test (helper `league_strength.py`, tested) | pitch caches (`--caches`, must include RelSpeed) |
 
 **Run 01 first, every time the source data changes.** If its prints do not match
 the anchor table in RESULTS.md, stop and reconcile before trusting anything else.

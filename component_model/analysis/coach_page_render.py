@@ -367,23 +367,34 @@ def heatmap(g, value_col, row_label, col_label, vmax=None):
 CURVE_STYLE = {
     "blend":   ("#003c71", 3.0, "",     "Stuff+ and Location+"),
     "stuff":   ("#00539f", 3.0, "",     "Stuff+"),
-    "loc":     ("#003c71", 2.4, "7 4",  "Location+"),
+    "loc":     ("#00a0df", 3.0, "",     "Location+"),
     "results": ("#bdbdbd", 3.0, "",     "2025 adjusted run value"),
+    "pitch":   ("#ffd200", 4.5, "",     "Pitching+"),
 }
-# Brand palette (2026-11): UD Blue carries Stuff+, Dark Navy dashed carries Location+, and
-# the results line is Cool Gray because it is the context series the grades are read
-# against. Dash pattern separates the two blues; every line is direct-labelled. The one
-# UD Yellow mark is the Location+/Stuff+ crossover dot, drawn only if the curves cross.
+# Brand palette (2026-11): Pitching+ is the one UD Yellow line (the composite is the
+# point of the chart); the single grades are UD Blue and Light Blue, and the results
+# line is Cool Gray as the context series. Dashes are reserved for PROJECTED segments,
+# so solid always means observed. Every line is direct-labelled.
 
 
-# Curves drawn on the sample-size chart, in back-to-front order. The combined
-# "Stuff+ and Location+" line is deliberately OMITTED: it tracks Location+ closely at
-# high volume (the two converge because independent signals add in quadrature, so a
-# fixed-strength Stuff+ contributes a shrinking absolute amount as Location+ grows),
-# and a coach reading four lines where two nearly coincide loses the one comparison
-# that matters -- how fast each single grade reaches a full season of results.
-# Re-add "blend" here to restore it; the data is still computed and cached.
-CURVES = ("results", "loc", "stuff")
+# Curves drawn on the sample-size chart, in back-to-front order. "Stuff+ and Location+"
+# (no results component) is still computed and cached but not drawn: it nearly coincides
+# with Pitching+ and a fifth line costs more than it shows.
+# Projections past the observed pool are drawn only where the fit is stable (fewer than
+# PROJ_MAX_FAIL of bootstrap fits fail); the band is drawn for Pitching+ only.
+PROJ_MAX_FAIL = 0.10
+# ...and only where the fitted curve meets the observed one at the join. Pitching+ misses
+# by ~0.02 at 250 (an equal-weight z blend is not a single per-pitch mean, so the
+# n/(n+k) form fits it loosely) and its 95% band spans roughly 0.23 to 0.55 by 800: not
+# drawn. A projection that starts below its own observed endpoint would read as a decline.
+PROJ_MAX_JOIN_GAP = 0.01
+
+
+def projectable(cv, k):
+    v = cv.get("projection", {}).get(k, {})
+    return bool(v.get("r")) and v["fit_fail_share"] < PROJ_MAX_FAIL and \
+        abs(v["r"][0] - cv["curves"][k]["r"][-1]) < PROJ_MAX_JOIN_GAP
+CURVES = ("results", "loc", "stuff", "pitch")
 
 
 def line_chart(cv, width=800, height=340, pad_l=208, pad_b=46, pad_t=14, pad_r=54):
@@ -397,9 +408,14 @@ def line_chart(cv, width=800, height=340, pad_l=208, pad_b=46, pad_t=14, pad_r=5
     described. The SE range lives in the caption instead.
     """
     grid, ref = cv["grid"], cv["reference"]
+    proj = {k: v for k, v in cv.get("projection", {}).items()
+            if k in CURVES and projectable(cv, k)}
     top = max(max(cv["curves"][k]["r"]) for k in CURVES)
+    if "pitch" in proj:
+        top = max(top, max(proj["pitch"]["hi"]))
     hi_y = math.ceil(top / 0.05 + 0.2) * 0.05
-    lo_x, hi_x = math.log(grid[0]), math.log(grid[-1])
+    x_end = max(proj[k]["grid"][-1] for k in proj) if proj else grid[-1]
+    lo_x, hi_x = math.log(grid[0]), math.log(x_end)
     iw, ih = width - pad_l - pad_r, height - pad_b - pad_t
 
     def x(n):
@@ -413,12 +429,19 @@ def line_chart(cv, width=800, height=340, pad_l=208, pad_b=46, pad_t=14, pad_r=5
     # y numbers sit on the RIGHT: the left margin is given over entirely to series labels,
     # which are placed at the start of each line rather than the end (the curves are far
     # better separated at 10 pitches than at 250, where two pairs nearly coincide).
-    for gv in [0.05 * i for i in range(1, int(round(hi_y / 0.05)) + 1)]:
+    for gv in [0.1 * i for i in range(1, int(round(hi_y / 0.1 + 1e-9)) + 1)]:
         out.append(f'<line x1="{pad_l}" y1="{y(gv):.1f}" x2="{pad_l + iw}" '
                    f'y2="{y(gv):.1f}" stroke="#eee" stroke-width="1"/>')
         out.append(f'<text x="{pad_l + iw + 9}" y="{y(gv) + 4:.1f}" '
                    f'font-size="11.5" fill="{MUTED}">{gv:.2f}</text>')
-    for n in (10, 20, 50, 100, 250):
+    if proj:
+        out.append(f'<line x1="{x(grid[-1]):.1f}" y1="{pad_t}" x2="{x(grid[-1]):.1f}" '
+                   f'y2="{pad_t + ih}" stroke="#ddd" stroke-width="1"/>')
+        out.append(f'<text x="{x(grid[-1]) - 6:.1f}" y="{pad_t + 12}" text-anchor="end" '
+                   f'font-size="11.5" fill="{MUTED}">observed</text>')
+        out.append(f'<text x="{x(grid[-1]) + 6:.1f}" y="{pad_t + 12}" '
+                   f'font-size="11.5" fill="{MUTED}">projected</text>')
+    for n in (10, 20, 50, 100, 250) + ((500, 800) if proj else ()):
         out.append(f'<text x="{x(n):.1f}" y="{height - pad_b + 20}" text-anchor="middle" '
                    f'font-size="11.5" fill="{MUTED}">{n}</text>')
     out.append(f'<text x="{pad_l + iw / 2:.1f}" y="{height - 6}" text-anchor="middle" '
@@ -429,6 +452,18 @@ def line_chart(cv, width=800, height=340, pad_l=208, pad_b=46, pad_t=14, pad_r=5
                f'text-anchor="middle" transform="rotate(-90 17 {ymid:.1f})">'
                f'correlation with 2026 adjusted run value &rarr;</text>')
 
+    if "pitch" in proj:
+        pj = proj["pitch"]
+        up = " ".join(f"{x(n):.1f},{y(v):.1f}" for n, v in zip(pj["grid"], pj["hi"]))
+        dn = " ".join(f"{x(n):.1f},{y(v):.1f}" for n, v in
+                      reversed(list(zip(pj["grid"], pj["lo"]))))
+        out.append(f'<polygon points="{up} {dn}" fill="#ffd200" opacity="0.18"/>')
+    for key in CURVES:
+        if key in proj:
+            pj, col = proj[key], CURVE_STYLE[key][0]
+            pts = " ".join(f"{x(n):.1f},{y(v):.1f}" for n, v in zip(pj["grid"], pj["r"]))
+            out.append(f'<polyline points="{pts}" fill="none" stroke="{col}" '
+                       f'stroke-width="2.4" stroke-dasharray="6 5"/>')
     for key in CURVES:
         c = cv["curves"][key]
         col, wdt, dash, _ = CURVE_STYLE[key]
@@ -438,15 +473,6 @@ def line_chart(cv, width=800, height=340, pad_l=208, pad_b=46, pad_t=14, pad_r=5
                    f'stroke-linejoin="round"/>')
         out.append(f'<circle cx="{x(grid[0]):.1f}" cy="{y(c["r"][0]):.1f}" r="4" '
                    f'fill="{col}"/>')
-
-    co = cv.get("crossovers", {}).get("loc_over_stuff", {}).get("grid_point")
-    if co:
-        lg = [math.log(n) for n in grid]
-        rv = float(np.interp(math.log(co), lg, cv["curves"]["stuff"]["r"]))
-        out.append(f'<circle cx="{x(co):.1f}" cy="{y(rv):.1f}" r="6" fill="#ffd200" '
-                   f'stroke="#003c71" stroke-width="1"/>')
-        out.append(f'<text x="{x(co):.1f}" y="{y(rv) - 12:.1f}" text-anchor="middle" '
-                   f'font-size="11.5" fill="{INK}">{co:.0f} pitches</text>')
 
     # Left-margin labels, anchored to where each line STARTS. Even here two can coincide
     # (the blend opens at 0.100 against the reference at 0.102), so they are separated

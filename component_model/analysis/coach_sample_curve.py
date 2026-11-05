@@ -70,9 +70,28 @@ REPS = 400           # shuffles for the point estimate; r is averaged, never the
 N_BOOT = 1000        # draws for the band: each is a fresh shuffle + a pitcher resample
 # The August run used 60 / 300; METHODS.md Part C asked for more before citing.
 VALUE = "adjT"       # per-pitch run value used for both the criterion and "results"
-MEASURES = ["stuff", "loc", "blend", "results"]
+MEASURES = ["stuff", "loc", "blend", "results", "pitch"]
 LABELS = {"stuff": "Stuff+", "loc": "Location+", "blend": "Stuff+ and Location+",
-          "results": "2025 adjusted run value"}
+          "results": "2025 adjusted run value", "pitch": "Pitching+"}
+# Pitching+ is the shipped composite exactly as 08_staff_scores.py builds Pitch100: an
+# EQUAL-weight mean of the three z-scored components (Stuff+, Location+, adjusted
+# results), each from the same n-pitch subsample. Nothing is fit, so nothing can be fit
+# on the 2026 criterion it is scored against. The z-scaling is within the pool at each n
+# (08 scales on the 100+ FF population; with equal weights the difference is only which
+# population sets each component's SD).
+
+# Extending past N_MAX. The fixed pool stops at N_MAX because every pitcher must be able
+# to supply n pitches. Higher thresholds are DIFFERENT, selected pools (high-volume arms:
+# starters, healthier, plausibly better), so they are reported separately and never
+# spliced onto the fixed-pool curves. Below MIN_EXT_POOL pitchers a correlation's CI is too
+# wide to read and the threshold is reported as a count only.
+EXT_T = [300, 350, 400, 450, 500, 600, 700, 800]
+MIN_EXT_POOL = 60
+# Projection for the fixed pool: R^2(n) = A * n / (n + k), the reliability_curves.py form
+# (A = ceiling^2 * persistence * share, k = noise/signal), fit to the observed curve over
+# FIT_FROM..N_MAX and to every bootstrap draw for the band.
+FIT_FROM = 20
+PROJ_GRID = [250, 300, 400, 500, 600, 800]
 
 
 def load_pool():
@@ -120,13 +139,14 @@ def crossing(r_up, r_down):
     return None
 
 
-def sb_fit(r):
+def sb_fit(r, grid=None):
     """Fit r(n) = a * sqrt(n / (n + k)) (Spearman-Brown attenuation of a mean of n noisy
     pitches) by least squares of 1/r^2 on 1/n. Returns (a^2, k), or None if any r <= 0."""
     r = np.asarray(r, dtype=float)
+    grid = GRID if grid is None else grid
     if (r <= 0).any():
         return None
-    slope, icpt = np.polyfit(1.0 / np.array(GRID), 1.0 / r ** 2, 1)
+    slope, icpt = np.polyfit(1.0 / np.array(grid), 1.0 / r ** 2, 1)
     if icpt <= 0:
         return None
     return 1.0 / icpt, max(slope / icpt, 0.0)
@@ -145,16 +165,46 @@ def sb_crossing(r_up, r_down, n_cap=20000):
     return float(ns[hit[0]]) if len(hit) else None
 
 
-def rep_means(arrays, rng):
+def rep_means(arrays, rng, grid=None):
     """One shuffle per pitcher; running means read off at every grid point.
     Returns array [pitcher, measure_raw(3), grid]."""
-    out = np.empty((len(arrays), 3, len(GRID)))
-    idx = np.array(GRID) - 1
+    grid = GRID if grid is None else grid
+    out = np.empty((len(arrays), 3, len(grid)))
+    idx = np.array(grid) - 1
     for i, (ridge, loc, tgt) in enumerate(arrays.values()):
-        perm = rng.permutation(len(ridge))[:N_MAX]
+        perm = rng.permutation(len(ridge))[:grid[-1]]
         for j, arr in enumerate((ridge[perm], loc[perm], tgt[perm])):
-            out[i, j] = np.cumsum(arr)[idx] / np.array(GRID)
+            out[i, j] = np.cumsum(arr)[idx] / np.array(grid)
     return out
+
+
+def projection(point_r, boot_r):
+    """Fixed-pool projection past N_MAX from the R^2 = A n/(n+k) form, fit on the
+    observed grid from FIT_FROM. Band = 2.5/97.5 pct of the per-draw fits; draws whose fit
+    fails (a non-positive r, or a non-positive asymptote) are counted, not dropped."""
+    import reliability_curves as rc
+    g = [n for n in GRID if n >= FIT_FROM]
+    sl = slice(GRID.index(g[0]), None)
+
+    def curve(r):
+        f = sb_fit(np.asarray(r)[sl], g)
+        if f is None:
+            return None, None
+        A, k = f
+        return np.sqrt(rc.reliability_curve(PROJ_GRID, np.sqrt(A), 1.0, 1.0, k, 1.0)), (A, k)
+
+    pt, par = curve(point_r)
+    draws = [curve(b)[0] for b in boot_r]
+    ok = np.array([d for d in draws if d is not None])
+    fail = 1 - len(ok) / len(draws)
+    lo, hi = (np.percentile(ok, [2.5, 97.5], axis=0) if len(ok) else (None, None))
+    return dict(grid=PROJ_GRID,
+                r=None if pt is None else [round(float(v), 4) for v in pt],
+                lo=None if lo is None else [round(float(v), 4) for v in lo],
+                hi=None if hi is None else [round(float(v), 4) for v in hi],
+                asymptote_r=None if par is None else round(float(np.sqrt(par[0])), 4),
+                k_noise_over_signal=None if par is None else round(float(par[1]), 1),
+                fit_fail_share=round(float(fail), 4))
 
 
 def main() -> int:
@@ -182,7 +232,8 @@ def main() -> int:
         """The four measures for one grid point, on one (possibly resampled) pitcher set.
         All stay in run-value orientation (lower = better), matching the criterion."""
         st, lo, re = vals[idx, 0, gi], vals[idx, 1, gi], vals[idx, 2, gi]
-        return dict(stuff=st, loc=lo, blend=(z(st) + z(lo)) / 2, results=re)
+        return dict(stuff=st, loc=lo, blend=(z(st) + z(lo)) / 2, results=re,
+                    pitch=(z(st) + z(lo) + z(re)) / 3)
 
     def corr(a, b):
         return float(np.corrcoef(a, b)[0, 1])
@@ -268,6 +319,52 @@ def main() -> int:
               f"P(cross by {N_MAX}) {within:.1%}; fitted {sb_pt} "
               f"[95%: {q[0]:.0f}, {q[2]:.0f}], P(never) {np.isinf(sbv).mean():.1%}")
 
+    # ---- projection past N_MAX on the fixed pool
+    proj = {}
+    print(f"\n  fixed-pool projection (R^2 = A n/(n+k), fit on {FIT_FROM}..{N_MAX}):")
+    for m in MEASURES:
+        proj[m] = projection(curves[m], bse[m])
+        pj = proj[m]
+        band = ("unusable: fit failed" if pj["r"] is None else
+                "  ".join(f"{n}: {r:+.3f} [{l:+.3f},{h:+.3f}]" for n, r, l, h in
+                          zip(PROJ_GRID, pj["r"], pj["lo"], pj["hi"])))
+        print(f"    {LABELS[m]:<24} k={pj['k_noise_over_signal']}  "
+              f"fail {pj['fit_fail_share']:.1%}  {band}")
+
+    # ---- higher-volume pools, reported separately (different population)
+    ext = []
+    print("\n  higher-volume pools (NOT the fixed pool; selected high-volume arms):")
+    for T in EXT_T:
+        sub = {pid: v for pid, v in arrays.items() if len(v[0]) >= T}
+        e = dict(threshold=T, pitchers=len(sub))
+        if len(sub) >= MIN_EXT_POOL:
+            keep = np.array([len(v[0]) >= T for v in arrays.values()])
+            cs, g2 = crit[keep], [N_MAX, T]
+            re_ = np.random.default_rng(1000 + T)
+            pa = {m: np.zeros(2) for m in MEASURES}
+            for _ in range(REPS):
+                vals = rep_means(sub, re_, g2)
+                for gi in range(2):
+                    mv = measures_at(vals, gi, np.arange(len(sub)))
+                    for m in MEASURES:
+                        pa[m][gi] += corr(mv[m], cs) / REPS
+            bb = {m: np.zeros((N_BOOT, 2)) for m in MEASURES}
+            for b in range(N_BOOT):
+                vals = rep_means(sub, re_, g2)
+                ix = re_.integers(0, len(sub), len(sub))
+                for gi in range(2):
+                    mv = measures_at(vals, gi, ix)
+                    for m in MEASURES:
+                        bb[m][b, gi] = corr(mv[m], cs[ix])
+            e.update(at=g2, curves={m: dict(r=[round(float(v), 4) for v in pa[m]],
+                                             se=[round(float(bb[m][:, i].std()), 4)
+                                                 for i in range(2)]) for m in MEASURES})
+            print(f"    {T}+: {len(sub)} pitchers  " + "  ".join(
+                f"{LABELS[m]} {pa[m][0]:+.3f}->{pa[m][1]:+.3f}" for m in MEASURES))
+        else:
+            print(f"    {T}+: {len(sub)} pitchers (below {MIN_EXT_POOL}; not estimated)")
+        ext.append(e)
+
     out = dict(pool=len(arrays), n_max=N_MAX, crit_floor=CRIT_FLOOR, grid=GRID,
                reps=REPS, n_boot=N_BOOT, mean_graded_pitches=round(n_full, 1),
                curves={m: dict(
@@ -284,6 +381,7 @@ def main() -> int:
                reference=dict(label="Full 2025 season of the criterion value",
                               r=round(ref_r, 4), pitches=round(n_full, 1)),
                crossing=match, crossovers=cross, criterion=VALUE,
+               projection=proj, extension_pools=ext, min_ext_pool=MIN_EXT_POOL,
                adj_method=fc.resolve_adj_method())
     dest = os.path.join(a.out or fc.workdirs()[1], "coach_sample_curve.json")
     with open(dest, "w") as fh:

@@ -28,10 +28,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import bullpen_tag_join as bj
 
-REAL_BP_CSV = (
-    r"C:\Users\jackdav\AppData\Local\Temp\claude\C--Users-jackdav-repos-baseball-stuff-plus"
-    r"\ac4efe49-1c39-4819-a422-9b522379fc23\scratchpad\bp.csv"
-)
+# A real bullpen export, for the one test that drives the join end to end.
+# Licensed TrackMan data never lives in the repo, so the path comes from the
+# environment and the test skips when it is unset.
+REAL_BP_CSV = os.environ.get("BULLPEN_REAL_CSV", "")
 
 BASE_T = datetime(2026, 8, 18, 14, 42, 31, tzinfo=timezone.utc)
 CADENCE = timedelta(seconds=12)
@@ -51,7 +51,7 @@ def _pitch_df(n, start=BASE_T, cadence=CADENCE, start_pitch_no=1, level="TeamExc
             "Time": t.strftime("%H:%M:%S.%f")[:-4],
             "UTCDateTime": t.strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
             "PitchUID": f"uid-{pitch_no}",
-            "PitcherId": 823910,
+            "PitcherId": 900001,
             "AutoPitchType": "Fastball",
             "RelSpeed": 90.0,
             "PlateLocSide": 0.0,
@@ -65,10 +65,10 @@ def _iso(t):
     return t.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
-def _session(tags, session_id="2026-08-18__823910__T104231Z"):
+def _session(tags, session_id="2026-08-18__900001__T104231Z"):
     return {
-        "sessionId": session_id, "pitcherId": "823910",
-        "pitcherName": "Callaway, Andrew", "date": "2026-08-18",
+        "sessionId": session_id, "pitcherId": "900001",
+        "pitcherName": "Test-Pitcher, Alpha", "date": "2026-08-18",
         "tags": tags,
     }
 
@@ -267,9 +267,8 @@ def test_seq_must_be_contiguous_and_one_based():
 
 
 @pytest.mark.skipif(not os.path.exists(REAL_BP_CSV),
-                     reason="real bullpen export not present at the scratch path "
-                            "for this session; licensed TrackMan data is never "
-                            "committed to the repo")
+                     reason="set BULLPEN_REAL_CSV to a real bullpen export to run; "
+                            "licensed TrackMan data is never committed to the repo")
 def test_real_export_anchors_past_warmups():
     """Drive the join against the actual bullpen CSV extracted for this task:
     42 real pitches, one pitcher, Level == TeamExclusive, ~12s cadence. Builds
